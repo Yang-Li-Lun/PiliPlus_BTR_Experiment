@@ -5,7 +5,7 @@ $dart = Join-Path $repo '.toolchain/flutter/bin/cache/dart-sdk/bin/dart.exe'
 $harness = Join-Path $PSScriptRoot 'btr_tests'
 Push-Location $harness
 try {
-    & $dart pub get
+    & $dart pub get --enforce-lockfile
     if ($LASTEXITCODE) { throw 'Test runner dependency resolution failed' }
     $configPath = Join-Path $harness '.dart_tool/package_config.json'
     $config = Get-Content -LiteralPath $configPath -Raw | ConvertFrom-Json

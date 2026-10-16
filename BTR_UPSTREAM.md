@@ -82,6 +82,8 @@ pwsh -NoProfile -File .\tool\btr_test.ps1
 pwsh -NoProfile -File .\tool\btr_build.ps1 -AndroidSdk <SDK路徑> -JavaHome <JDK路徑>
 ```
 
+若所有鎖定套件已在快取，可用 `pub get --offline --enforce-lockfile` 避免不必要的 Git 套件網路取得；仍必須核對 lockfile 沒有改動。
+
 `btr_candidate_setup.ps1` 先核對同一 Git repository、SDK 版本、pubspec／lock 與 patch 內容，再建立 junction、複製既有 DEV key。
 重用的 SDK/cache 不得執行 patch helpers，也不要並行執行 Pub 或 SDK 修改。
 輸入有差異時拒絕重用：改在候選 `.toolchain` 準備獨立 SDK/cache、依新上游 patches 做相容處理，維持既有簽章並記錄版本；不要覆蓋種子 SDK。
@@ -92,6 +94,7 @@ pwsh -NoProfile -File .\tool\btr_build.ps1 -AndroidSdk <SDK路徑> -JavaHome <JD
 若候選路徑本身過長，使用較短、唯一的 RunId 建立新候選，不移動或刪除舊工作樹。
 
 純 Dart runner 直接測候選 production source，HTTP 僅限 loopback Fake CDN。
+runner 以 `--enforce-lockfile` 取得自己的測試依賴，避免每次同步順便升級測試套件。
 Flutter/native 測試若在 cnativeapi 的 Windows MSVC 前置條件阻擋，須保留失敗日誌並列為 BLOCKED，不能聲稱全部測試通過。
 
 建置產物位於候選自己的 `build/app/outputs/flutter-apk/app-arm64-v8a-release.apk`。
