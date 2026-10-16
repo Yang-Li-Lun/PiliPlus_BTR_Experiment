@@ -16,6 +16,23 @@ class BtrCancel {
     if (cancelled) throw const BtrCancelled();
   }
 
+  /// Unlike binding Future.delayed, cancellation also removes the timer itself.
+  Future<void> delay(Duration duration) async {
+    check();
+    final done = Completer<void>();
+    final timer = Timer(duration, done.complete);
+    final unlink = listen(() {
+      timer.cancel();
+      if (!done.isCompleted) done.completeError(const BtrCancelled());
+    });
+    try {
+      await done.future;
+    } finally {
+      timer.cancel();
+      unlink();
+    }
+  }
+
   void Function() listen(void Function() callback) {
     if (cancelled) {
       callback();
@@ -68,11 +85,13 @@ class _Waiter {
 /// Shared across both tracks, including discovery, retries and hedge copies.
 /// One slot is reserved for audio and one for a demanded head rescue.
 class BtrScheduler {
-  BtrScheduler({int limit = 8}) : _limit = limit.clamp(2, 16);
+  BtrScheduler({int limit = 8}) : _limit = limit.clamp(2, resourceLimit);
+  // Preserve the validated Android connection budget, including probes/hedges.
+  static const resourceLimit = 16;
   int _limit;
   int get limit => _limit;
   set limit(int value) {
-    _limit = value.clamp(2, 16);
+    _limit = value.clamp(2, resourceLimit);
     _drain();
   }
 
@@ -133,9 +152,10 @@ class BtrScheduler {
 /// Android cap 16, versus the browser's 64. Counts useful ordered delivery,
 /// never hedge waste. Only saturated demand may start a ten-second trial.
 class BtrAdaptive {
-  BtrAdaptive(this.scheduler, {int Function()? clock})
+  BtrAdaptive(this.scheduler, {this.automatic = true, int Function()? clock})
     : now = clock ?? (() => DateTime.now().millisecondsSinceEpoch);
   final BtrScheduler scheduler;
+  final bool automatic;
   final int Function() now;
   static const ladder = [8, 12, 16];
   final _samples = <(int, int)>[];
@@ -185,7 +205,8 @@ class BtrAdaptive {
     this.buffering = buffering;
     this.ahead = ahead;
     final at = now();
-    if (!playing ||
+    if (!automatic ||
+        !playing ||
         ahead >= 6 ||
         scheduler.active < scheduler.limit - 1 ||
         scheduler.queued == 0 ||
@@ -205,10 +226,9 @@ class BtrAdaptive {
 
   void pushback() {
     if (now() < _restUntil) return; // one refusal batch, one backoff
-    scheduler.limit = ladder.lastWhere(
-      (v) => v < scheduler.limit,
-      orElse: () => 8,
-    );
+    scheduler.limit = automatic
+        ? ladder.lastWhere((v) => v < scheduler.limit, orElse: () => 8)
+        : math.max(2, scheduler.limit ~/ 2);
     _restUntil = now() + 180000;
     _trialFrom = null;
   }

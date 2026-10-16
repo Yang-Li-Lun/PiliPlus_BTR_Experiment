@@ -1,8 +1,29 @@
-# PiliPlus BTR Android experiment
+# PiliPlus BTR Android 功能整合
 
-本專案是獨立的 Android DEV 工程候選版本。預設為「整合模式」，尚未執行 Android 實機播放、真實 CDN、A/V 同步或長時間播放驗收，不宣稱任何模式較快。
+本專案是獨立的 Android DEV 工程。這一階段以 `788faa8ab` 為基準，保留使用者已確認順暢的整合模式預設傳輸、CDN 策略及 media_kit/mpv，優先增加設定與監控。新增功能尚未經 Android 實機驗證。
 
-## 本次交付結果（2026-10-16）
+## 設定與監控整合（2026-10-16）
+
+- 本機分支 `codex/btr-settings-monitor`；還原標籤 `btr-before-monitor-20261016` 固定於 `788faa8abee2ff325205d89a9fa24869821685e3`，`main` 未移動。修改保留在工作樹，未推送遠端。
+- 設定入口：設定 → 播放設定 → **BTR 功能設定**；播放中也可從播放器「更多設定」→ **BTR 功能設定與監控** 進入。
+- 僅提供「原始 PiliPlus」與「BTR 整合加速（預設）」。保留原模式設定鍵，舊 `threaded`／`switcher` 會遷移為 `combined`；`original` 不變。
+- 新設定存於既有 Hive setting box 的 `btrSettingsV2`，不讀寫其他帳號或設定內容。自動線程保留 8→12→16；手動提供 4／8／16／32／64／128。手動值會作用於共用傳輸排程，但目前 Android 資源硬上限仍是 16，並保留每軌 4 MiB 有序視窗、音訊保留容量、Hedge 預算及 CDN 拒絕退讓。32／64／128 不代表可突破 16 個上游連線。
+- CDN 偏好可選自動、ALI-OV、ALI、COS，只調整既有合格候選順序；保留驗證、競速與失敗備援，不增加任意來源或跨 CDN 分段拼接。
+- 每次播放固定一份傳輸設定；模式、線程與 CDN 變更在重新開啟影片／切換畫質時套用。監控、詳細資訊、錯誤與事件顯示偏好可即時變更。
+- 播放畫面的小型監控使用 IgnorePointer，不攔截手勢。完整監控顯示總／分軌活動請求、設定／實際／資源上限、排隊、實收與有效交付速率、實際 CDN／選源／失敗、緩衝／播放／時間線、失敗／重試／Hedge／取消／續傳及累計交付量。詳細資訊與事件預設收合，JSON 僅在點擊複製時產生。
+- 監控每秒刷新小範圍 UI；關閉後移除 UI 計時器，不增設網路探測或 mpv 輪詢。每軌速率以 250 ms 有界 bucket 計算五秒平均。實收只計已讀 HTTP body（含 probe／Hedge／重試），不含協定開銷；有效交付為 loopback socket 交付，並非解碼量。原始模式、不適用軌道及未知數值保持 null／「未取得」。
+- 診斷只保留最近 8 次 session、每次 128 個事件及 32 次 Seek。CDN 僅記錄 host，錯誤僅記錄受控代碼／HTTP 狀態；不記錄完整 URL、簽名 query、ETag 內容、Cookie、Token 或帳號。
+
+| 本階段驗證 | 結果 | 證據 |
+|---|---|---|
+| 純 Dart／本機 Fake CDN／Hive 磁碟重開 | **46/46 PASS**；涵蓋兩模式與遷移、六種上限實際 permit、手動低上限 429 退讓後完整交付、高設定資源限制、CDN 偏好／備援、分軌流量與未知值、既有 Range／身分／Hedge／續傳／取消 | `evidence/btr-monitor-20261016/tests-final.log` |
+| 所有修改的 Dart 檔與 BTR 測試靜態分析 | **No issues found** | `evidence/btr-monitor-20261016/analyze-final.log` |
+| Flutter/native 測試 | **環境阻擋，未進入案例**：既有 cnativeapi 缺 Windows MSVC C compiler | `evidence/btr-monitor-20261016/flutter-native-test.log` |
+| Android UI、實際播放／CDN、CPU／記憶體開銷及長時測試 | **未驗證**；未操作手機，未建置或安裝新 APK | 本階段工作範圍 |
+
+以下 APK、雜湊及 28 項測試是基準版本的既有交付紀錄，不是本階段修改後的建置或驗收結果；歷史 evidence 與 APK 均未更動。
+
+## 基準版本既有交付結果（2026-10-16）
 
 - APK：`build/btr-dev/PiliPlus-BTR-Experiment-2.1.6-dev-arm64-v8a.apk`
 - SHA-256：`a7428322daa4f667f1b5cc99c0a5dc3a7b7c62a125e36f0571493bc3b739ed2a`
@@ -55,18 +76,16 @@ BTR 附件不是單一通用下載器：
 
 Switcher 的有效行為是先選 ALI-OV、提供 ALI/COS 與合格原始備援、過濾 MCDN/P2P、保留 Dolby/FLAC 音訊結構。瀏覽器的遞迴 API 改寫與攔截不移植；Android 僅在既有 DASH 畫質/音質選定後處理該 representation 的 URL 集合。
 
-## 四種模式
+## 目前兩種模式
 
-入口：設定 → 播放設定 → **BTR Android 實驗**。切換後重新開啟影片或切換畫質生效，不會中途混用新舊來源。
+入口：設定 → 播放設定 → **BTR 功能設定**。切換後重新開啟影片或切換畫質生效，不會中途混用新舊來源。
 
 | 模式 | 選源 | 傳輸 |
 |---|---|---|
 | 原始 PiliPlus | 上游原有 VideoUtils / 使用者 CDN 設定 | 原生 media_kit/mpv，完全繞過實驗代理 |
-| 僅線程撕裂者 | 合格原始來源優先，加入附件 mainland 的八個受控來源 | 同來源有序多 Range、動態分段、自適應並行、Hedge/續傳 |
-| 僅 CDN Switcher | ALI-OV、ALI、COS、合格原始備援 | 選源驗證後單一串流請求，沒有媒體分段並行或媒體 Hedge |
-| 整合模式（預設） | 與 Switcher 共用同一來源流程 | 選源後套用 BTR 傳輸策略 |
+| BTR 整合加速（預設） | ALI-OV、ALI、COS、合格原始備援；可調整合格 CDN 偏好 | 選源驗證後套用同來源 BTR 多 Range、動態分段、Hedge／續傳 |
 
-所有實驗模式均先做有限的 64 KiB Range 選源驗證；因此 Switcher-only 也可能有短暫選源競速。ALI-OV 有 120/300 ms 的先行機會，但無法回傳合法內容時不強制使用。URL 只改寫一次；影片與音訊分別持有候選池、來源身分、有序視窗及取消狀態，共用連線預算。
+整合模式先做有限的 64 KiB Range 選源驗證。自動優選下 ALI-OV 有 120/300 ms 的先行機會，但無法回傳合法內容時不強制使用；設定 CDN 偏好時將偏好來源排在首位，保留相同驗證與備援。URL 只改寫一次；影片與音訊分別持有候選池、來源身分、有序視窗及取消狀態，共用連線預算。
 
 ## 已移植與明確差異
 
@@ -98,7 +117,7 @@ Switcher 的有效行為是先選 ALI-OV、提供 ALI/COS 與合格原始備援�
 - `loopbackDeliveredBytes` / `deliveredByTrack` / `loopbackDeliveredBps5s`：成功交給 loopback socket 的有序資料與最近五秒速率；不是已解碼量，也不是精確「不同 byte offset 的去重流量」。
 - `networkBytesIncludingProbesAndHedges` 包含選源、失敗前綴與 Hedge 浪費，不能拿來當有效播放吞吐量。
 - 所有模式另取 mpv `cache-speed` 與 `demuxer-cache-state/total-bytes`。前者是主 demuxer 的輸入速率估計，後者是目前 packet queue 大小，**不是累計下載量**；未提供時為 null，分離音訊未必包含在主 demuxer 中。依據：[mpv properties](https://mpv.io/manual/stable/#properties)。
-- **原始模式的精確累計傳輸量/音訊吞吐量尚不可由上游 mpv 介面量得**，代理統計為 null。四模式可比較時間線/緩衝/player errors 與原生主 demuxer 速率；精確代理交付量只適用於實際走代理的軌。不可把 null 當 0，或把兩種口徑畫成等價數據。
+- **原始模式的精確累計傳輸量/音訊吞吐量尚不可由上游 mpv 介面量得**，代理統計為 null。兩模式可比較時間線/緩衝/player errors 與原生主 demuxer 速率；精確代理交付量只適用於實際走代理的軌。不可把 null 當 0，或把兩種口徑畫成等價數據。
 
 ## 本機重現
 
@@ -127,7 +146,7 @@ $env:PUB_CACHE = Join-Path $PWD '.toolchain/pub-cache'
 ## 後續 Android 人工驗收（本次未執行）
 
 1. 由使用者另行授權安裝 DEV APK，確認 `PiliPlus BTR DEV` 與原 app 並存、原 app 資料未變。本版本使用本地 DEV key，並非官方簽章。
-2. 使用相同裝置/網路/影片/畫質/codec/音質，固定一次播放長度與 Seek 點；每次重新開啟影片。先短片確認音畫正確，再測高碼率。四模式順序交錯，避免把 CDN 時段或 native cache 差異當成策略收益。
+2. 使用相同裝置/網路/影片/畫質/codec/音質，固定一次播放長度與 Seek 點；每次重新開啟影片。先短片確認音畫正確，再測高碼率。兩模式順序交錯，避免把 CDN 時段或 native cache 差異當成策略收益。另驗證設定重啟保存、手動上限、CDN 偏好備援、監控顯示與手勢。
 3. 各模式記錄起播、每次 Seek、緩衝、錯誤、原生速率與有效代理交付量；複製 JSON。檢查 `tracks` 實際 host、identity、terminal、連線峰值及 native fallback，不能只看所選模式名稱。
 4. 驗證連續 Seek、取消/返回、換畫質、切音質、影片末端、暫停恢復、背景/前景、音訊單播；確認沒有混軌、花屏或音畫不同步。錯誤時保留紀錄並停止該輪，不反覆對 CDN 重試或壓測。
 5. 驗證 Dolby/FLAC、字幕/彈幕/PiP 及一般導覽仍按上游行為；直播/離線/投屏為回歸項目，不能當成已移植 BTR 的模式。

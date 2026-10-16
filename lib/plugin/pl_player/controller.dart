@@ -31,6 +31,8 @@ import 'package:PiliPlus/plugin/pl_player/utils/danmaku_options.dart';
 import 'package:PiliPlus/plugin/pl_player/utils/fullscreen.dart';
 import 'package:PiliPlus/services/service_locator.dart';
 import 'package:PiliPlus/services/btr/playback.dart';
+import 'package:PiliPlus/services/playback_task_scope.dart';
+import 'package:PiliPlus/services/player_disposal.dart';
 import 'package:PiliPlus/utils/accounts.dart';
 import 'package:PiliPlus/utils/android/android_helper.dart';
 import 'package:PiliPlus/utils/android/bindings.g.dart';
@@ -76,7 +78,9 @@ typedef PlayOwner = ({String tag, Type type});
 
 class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
   BtrPlayback? _btrPlayback;
+  BtrPlayback? get btrPlayback => _btrPlayback;
   int _btrOpenGeneration = 0;
+  late final PlaybackTaskScope _taskScope;
   Player? _videoPlayerController;
   VideoController? _videoController;
 
@@ -651,6 +655,7 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
 
   // 添加一个私有构造函数
   PlPlayerController._() {
+    _taskScope = PlaybackTaskScope(onClose: _disposeResources);
     if (PlatformUtils.isMobile) {
       _orientationListener = NativeDeviceOrientationPlatform.instance
           .onOrientationChanged(
@@ -723,6 +728,9 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
     Volume? volume,
     bool autoFullScreenFlag = false,
   }) async {
+    if (_taskScope.closed) return;
+    await videoPlayerServiceHandler?.beginPlayback();
+    if (_taskScope.closed) return;
     try {
       _processing = true;
       this.isLive = isLive;
@@ -759,7 +767,9 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
 
       if (_playerCount == 0) {
         _removeListeners();
-        _videoPlayerController?.dispose();
+        if (_videoPlayerController case final player?) {
+          await _taskScope.release(player);
+        }
         _videoPlayerController = null;
         _videoController = null;
         return;
@@ -839,7 +849,7 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
     }
   }
 
-  Future<Player> _initPlayer() async {
+  Future<Player?> _initPlayer() => _taskScope.acquire(() async {
     assert(_videoPlayerController == null);
     final opt = {
       'video-sync': Pref.videoSync,
@@ -860,16 +870,25 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
       ),
     );
 
+    if (_taskScope.closed) return player;
+
     assert(_videoController == null);
 
-    _videoController = await VideoController.create(
-      player,
-      configuration: VideoControllerConfiguration(
-        enableHardwareAcceleration: hwdec != null,
-        androidAttachSurfaceAfterVideoParameters: false,
-        hwdec: hwdec,
-      ),
-    );
+    try {
+      final videoController = await VideoController.create(
+        player,
+        configuration: VideoControllerConfiguration(
+          enableHardwareAcceleration: hwdec != null,
+          androidAttachSurfaceAfterVideoParameters: false,
+          hwdec: hwdec,
+        ),
+      );
+      if (_taskScope.closed) return player;
+      _videoController = videoController;
+    } catch (_) {
+      await disposePlaybackPlayer(player);
+      rethrow;
+    }
 
     if (Platform.isAndroid) {
       // Avoid sizing the surface using mpv's idle window between media loads.
@@ -881,7 +900,7 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
     _startListeners(player);
 
     return player;
-  }
+  }, disposePlaybackPlayer);
 
   late final buffer = Pref.initBuffer(_playbackSpeed.value);
   late final liveBuffer = Pref.initLiveBuffer();
@@ -896,6 +915,7 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
     final previousBtr = _btrPlayback;
     _btrPlayback = null;
     await previousBtr?.close();
+    if (_taskScope.closed || generation != _btrOpenGeneration) return false;
     final (session, preparedSource) = await BtrPlayback.prepare(
       dataSource,
       isLive,
@@ -914,10 +934,11 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
 
     if (player == null) {
       player = await _initPlayer();
+      if (player == null) return false;
       if (_playerCount == 0 || generation != _btrOpenGeneration) {
         await session?.close();
         _removeListeners();
-        player.dispose();
+        await _taskScope.release(player);
         player = null;
         _videoController = null;
         return false;
@@ -927,6 +948,8 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
         await setShader();
       }
     }
+
+    if (_taskScope.closed || generation != _btrOpenGeneration) return false;
 
     final Map<String, String> extras = {
       if (dataSource is FileSource)
@@ -971,6 +994,7 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
   }
 
   Future<void>? refreshPlayer() {
+    if (_taskScope.closed) return null;
     if (dataSource is FileSource) {
       return null;
     }
@@ -984,7 +1008,7 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
 
   // 开始播放
   Future<void> _initializePlayer() async {
-    if (_instance == null) return;
+    if (_taskScope.closed || _instance == null) return;
     // 设置倍速
     if (_videoPlayerController != null) {
       final speed = isLive ? 1.0 : playbackSpeed;
@@ -992,6 +1016,7 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
         await setPlaybackSpeed(speed);
       }
     }
+    if (_taskScope.closed) return;
     _initVideoFit();
 
     // 自动播放
@@ -1005,6 +1030,7 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
   final Set<ValueChanged<PlayerStatus>> _statusListeners = {};
 
   Timer? _wakeLockTimer;
+  Timer? _retryTimer;
 
   void _startWakeLockTimer() {
     _wakeLockTimer?.cancel();
@@ -1025,6 +1051,7 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
   }
 
   void _updatePlaybackState({Duration? position, String? debugLabel}) {
+    if (_taskScope.closed || _videoPlayerController == null) return;
     videoPlayerServiceHandler?.onUpdateState(
       playerStatus,
       isBuffering.value,
@@ -1144,7 +1171,11 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
           if (event.startsWith('tcp: ffurl_read returned ') ||
               event.startsWith("Failed to open https://") ||
               event.startsWith("Can not open external file https://")) {
-            Timer(const Duration(milliseconds: 3000), refreshPlayer);
+            _retryTimer?.cancel();
+            _retryTimer = Timer(
+              const Duration(milliseconds: 3000),
+              refreshPlayer,
+            );
           }
           return;
         }
@@ -1157,7 +1188,8 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
             'controllerStream.error.listen',
             const Duration(milliseconds: 10000),
             () {
-              Timer(const Duration(milliseconds: 3000), () {
+              _retryTimer?.cancel();
+              _retryTimer = Timer(const Duration(milliseconds: 3000), () {
                 // if (kDebugMode) {
                 //   debugPrint("isBuffering.value: ${isBuffering.value}");
                 // }
@@ -1193,10 +1225,11 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
   }
 
   /// 移除事件监听
-  void _removeListeners() {
-    _subscriptions?.forEach((e) => e.cancel());
+  Future<void> _removeListeners() {
+    final cancelled = _subscriptions?.map((e) => e.cancel()).toList();
     _subscriptions?.clear();
     _subscriptions = null;
+    return Future.wait(cancelled ?? []);
   }
 
   void _cancelSubForSeek() {
@@ -1688,9 +1721,13 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
       return;
     }
 
+    _taskScope.close();
+  }
+
+  Future<void> _disposeResources() {
     _playerCount = 0;
     _btrOpenGeneration++;
-    _btrPlayback?.close();
+    final btrClosed = _btrPlayback?.close();
     _btrPlayback = null;
     if (removeSafeArea) {
       showSystemBar();
@@ -1709,6 +1746,11 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
       IOSPipHelper.dispose();
     }
     _timer?.cancel();
+    volumeTimer?.cancel();
+    cancelLongPressTimer();
+    _cancelSubForSeek();
+    _retryTimer?.cancel();
+    EasyThrottle.cancel('controllerStream.error.listen');
     // _position.close();
     // _playerEventSubs?.cancel();
     // _sliderPosition.close();
@@ -1726,7 +1768,7 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
       WindowController.instance.window?.isAlwaysOnTop = false;
     }
 
-    _removeListeners();
+    final listenersClosed = _removeListeners();
     _positionListeners.clear();
     _statusListeners.clear();
     _stopWakeLockTimer();
@@ -1734,11 +1776,11 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
     if (kDebugMode) {
       debugPrint('dispose player');
     }
-    _videoPlayerController?.dispose();
     _videoPlayerController = null;
     _videoController = null;
-    _instance = null;
+    if (identical(_instance, this)) _instance = null;
     videoPlayerServiceHandler?.clear();
+    return Future.wait([?btrClosed, listenersClosed]);
   }
 
   static void updatePlayCount() {

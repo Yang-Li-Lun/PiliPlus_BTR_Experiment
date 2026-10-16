@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:PiliPlus/http/browser_ua.dart';
@@ -6,24 +7,39 @@ import 'package:PiliPlus/http/constants.dart';
 import 'package:PiliPlus/plugin/pl_player/models/data_source.dart';
 import 'package:PiliPlus/services/btr/metrics.dart';
 import 'package:PiliPlus/services/btr/policy.dart';
+import 'package:PiliPlus/services/btr/settings.dart';
 import 'package:PiliPlus/services/btr/transport.dart';
+import 'package:PiliPlus/services/playback_task_scope.dart';
 import 'package:PiliPlus/utils/storage.dart';
+import 'package:flutter/foundation.dart';
 import 'package:media_kit/media_kit.dart';
 
 class BtrPlayback {
-  static const settingKey = 'btrExperimentModeV1';
-  static BtrMode get selectedMode =>
-      BtrMode.parse(GStorage.setting.get(settingKey));
+  static final settingsStore = BtrSettingsStore(
+    (key) => GStorage.setting.get(key),
+    (values) => GStorage.setting.putAll(values),
+  );
+  static BtrSettings get selectedSettings => settingsStore.current;
+  static final settingsRevision = ValueNotifier<int>(0);
+  static Future<void> saveSettings(BtrSettings settings) async {
+    await settingsStore.save(settings);
+    settingsRevision.value++;
+  }
+
   static BtrPlayback? current;
   static final recent = <Map<String, Object?>>[];
 
-  BtrPlayback(this.mode) : metrics = BtrMetrics(mode);
-  final BtrMode mode;
+  BtrPlayback(this.settings) : metrics = BtrMetrics(settings.mode) {
+    _taskScope = PlaybackTaskScope(onClose: _closeResources);
+  }
+  final BtrSettings settings;
+  BtrMode get mode => settings.mode;
   final BtrMetrics metrics;
   BtrTransport? transport;
   Timer? _meter;
   final _subscriptions = <StreamSubscription>[];
-  bool _closed = false;
+  late final PlaybackTaskScope _taskScope;
+  bool get _closed => _taskScope.closed;
 
   static Future<(BtrPlayback?, DataSource)> prepare(
     DataSource source,
@@ -32,7 +48,13 @@ class BtrPlayback {
     if (!Platform.isAndroid || live || source is! NetworkSource) {
       return (null, source);
     }
-    final playback = BtrPlayback(selectedMode);
+    final playback = BtrPlayback(selectedSettings);
+    try {
+      await settingsStore.load();
+    } catch (_) {
+      playback.metrics.event('settings-migration-failed');
+    }
+    if (playback._closed) return (null, source);
     current = playback;
     if (playback.mode == BtrMode.original || source.videoCandidates.isEmpty) {
       playback.metrics.transportMeasured = false;
@@ -42,6 +64,7 @@ class BtrPlayback {
     final transport = BtrTransport(
       mode: playback.mode,
       metrics: playback.metrics,
+      settings: playback.settings,
       headers: {'User-Agent': BrowserUa.pc, 'Referer': HttpString.baseUrl},
     );
     playback.transport = transport;
@@ -51,6 +74,7 @@ class BtrPlayback {
         if (source.audioCandidates.isNotEmpty)
           BtrTrackSpec(kind: 'audio', urls: source.audioCandidates),
       ]);
+      if (playback._closed) return (null, source);
       playback.metrics.transportMeasured = urls.isNotEmpty;
       if (!urls.containsKey('video')) {
         playback.metrics.event('native-video-fallback');
@@ -68,6 +92,7 @@ class BtrPlayback {
       );
     } catch (_) {
       await transport.close();
+      if (playback._closed) return (null, source);
       playback.transport = null;
       playback.metrics.transportMeasured = false;
       playback.metrics.event('native-fallback', {
@@ -78,7 +103,19 @@ class BtrPlayback {
   }
 
   void attach(Player player) {
+    if (_closed) return;
+    Duration? observedBuffer;
+    metrics.playing = player.state.playing;
     _subscriptions.add(player.stream.buffering.listen(metrics.buffering));
+    _subscriptions.add(
+      player.stream.buffer.listen((value) => observedBuffer = value),
+    );
+    _subscriptions.add(
+      player.stream.playing.listen((value) => metrics.playing = value),
+    );
+    _subscriptions.add(
+      player.stream.completed.listen((value) => metrics.completed = value),
+    );
     _subscriptions.add(
       player.stream.position.listen((p) {
         metrics.position(p.inMilliseconds, player.state.playing);
@@ -87,9 +124,14 @@ class BtrPlayback {
     _subscriptions.add(
       player.stream.error.listen((_) {
         metrics.playerErrors++;
+        metrics.event('player-error'); // Never retain mpv's raw error/URL.
       }),
     );
     _meter = Timer.periodic(const Duration(milliseconds: 500), (_) {
+      metrics.bufferAheadSeconds = observedBuffer == null
+          ? null
+          : ((observedBuffer! - player.state.position).inMilliseconds / 1000)
+                .clamp(0.0, double.infinity);
       transport?.adaptive.demand(
         playing: player.state.playing,
         buffering: player.state.buffering,
@@ -117,36 +159,32 @@ class BtrPlayback {
 
   Map<String, Object?> snapshot() => {
     ...metrics.snapshot(),
-    'activeConnections': transport?.scheduler.active,
-    'peakConnections': transport?.scheduler.peak,
-    'concurrencyLimit': transport?.scheduler.limit,
-    'tracks': transport?.tracks.values
-        .map(
-          (t) => {
-            'kind': t.spec.kind,
-            'host': t.sample?.identity.uri.host,
-            'identity': t.sample == null
-                ? 'pending'
-                : t.sample!.identity.canSegment
-                ? 'single-origin-strong-etag'
-                : 'single-response',
-            'peakOrderedReservationBytes': t.peakReservedBytes,
-            'terminal': t.terminal,
-            'health': t.health,
-          },
-        )
-        .toList(),
+    'sessionSettings': {'mode': mode.name, ...settings.options},
+    if (transport case final value?) ...value.snapshot(),
   };
 
-  Future<void> close() async {
-    if (_closed) return;
-    _closed = true;
+  static String diagnosticReport() =>
+      const JsonEncoder.withIndent('  ').convert({
+        'selectedSettings': {
+          'mode': selectedSettings.mode.name,
+          ...selectedSettings.options,
+        },
+        'current': current?.snapshot(),
+        'recent': recent,
+        'units': 'bytes; rates are 5-second averages of observed HTTP body bytes and loopback socket delivery, not decoded media or full wire traffic',
+      });
+
+  Future<void> close() => _taskScope.close();
+
+  Future<void> _closeResources() async {
     _meter?.cancel();
-    for (final sub in _subscriptions) {
-      await sub.cancel();
-    }
+    final cancelled = _subscriptions.map((sub) => sub.cancel()).toList();
     _subscriptions.clear();
-    await transport?.close();
+    await Future.wait([
+      if (transport != null) transport!.close(),
+      ...cancelled,
+    ]);
+    metrics.ended = true;
     recent.add(snapshot());
     if (recent.length > 8) recent.removeAt(0);
     if (identical(current, this)) current = null;

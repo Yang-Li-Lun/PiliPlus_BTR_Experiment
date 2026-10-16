@@ -14,6 +14,8 @@ import 'package:PiliPlus/pages/video/introduction/pgc/controller.dart';
 import 'package:PiliPlus/pages/video/introduction/ugc/controller.dart';
 import 'package:PiliPlus/plugin/pl_player/controller.dart';
 import 'package:PiliPlus/plugin/pl_player/models/play_status.dart';
+import 'package:PiliPlus/services/playback_task_scope.dart';
+import 'package:PiliPlus/services/shutdown_timer_service.dart';
 import 'package:PiliPlus/utils/android/bindings.g.dart';
 import 'package:PiliPlus/utils/image_utils.dart';
 import 'package:PiliPlus/utils/path_utils.dart';
@@ -49,8 +51,46 @@ typedef _StatusConfig = (
 );
 
 class VideoPlayerServiceHandler extends BaseAudioHandler with SeekHandler {
+  VideoPlayerServiceHandler({bool? enableBackgroundPlay})
+    : enableBackgroundPlay = enableBackgroundPlay ?? Pref.enableBackgroundPlay;
+
   static final List<MediaItem> _item = [];
-  bool enableBackgroundPlay = Pref.enableBackgroundPlay;
+  bool enableBackgroundPlay;
+  bool _taskRemoved = false;
+  Future<void>? _taskRemoval;
+
+  /// A fresh playback owner may be created when the Activity is opened again
+  /// in the same process. It must wait for the previous task's cleanup.
+  Future<void> beginPlayback() async {
+    if (_taskRemoval case final cleanup?) await cleanup;
+    _taskRemoval = null;
+    _taskRemoved = false;
+  }
+
+  @override
+  Future<void> onTaskRemoved() => _taskRemoval ??= _stopRemovedTask();
+
+  Future<void> _stopRemovedTask() async {
+    _taskRemoved = true;
+    onPlay = null;
+    onPause = null;
+    onSeek = null;
+    onSkipToNext = null;
+    onSkipToPrevious = null;
+    shutdownTimerService
+      ..onPause = null
+      ..isPlaying = null
+      ..reset();
+    try {
+      await PlaybackTaskScope.closeAll();
+    } finally {
+      // Independent of the background-play preference. idle drives the locked
+      // audio_service plugin's native stop/notification removal path.
+      clear(force: true);
+      queue.add(const []);
+      await super.stop();
+    }
+  }
 
   Future<void>? Function()? onPlay;
   Future<void>? Function()? onPause;
@@ -60,6 +100,7 @@ class VideoPlayerServiceHandler extends BaseAudioHandler with SeekHandler {
 
   @override
   Future<void> play() {
+    if (_taskRemoved) return Future.value();
     return onPlay?.call() ??
         PlPlayerController.playIfExists() ??
         Future.syncValue(null);
@@ -67,6 +108,7 @@ class VideoPlayerServiceHandler extends BaseAudioHandler with SeekHandler {
 
   @override
   Future<void> pause() {
+    if (_taskRemoved) return Future.value();
     return onPause?.call() ??
         PlPlayerController.pauseIfExists() ??
         Future.syncValue(null);
@@ -92,25 +134,28 @@ class VideoPlayerServiceHandler extends BaseAudioHandler with SeekHandler {
 
   @override
   Future<void> skipToNext() {
+    if (_taskRemoved) return Future.value();
     final func = onSkipToNext ?? _findIntroController()?.nextPlay;
     return func == null ? Future.syncValue(null) : Future.sync(func);
   }
 
   @override
   Future<void> skipToPrevious() {
+    if (_taskRemoved) return Future.value();
     final func = onSkipToPrevious ?? _findIntroController()?.prevPlay;
     return func == null ? Future.syncValue(null) : Future.sync(func);
   }
 
   @override
   Future<void> seek(Duration position) {
+    if (_taskRemoved) return Future.value();
     return onSeek?.call(position) ??
         PlPlayerController.seekToIfExists(position, isSeek: false) ??
         Future.syncValue(null);
   }
 
   void setMediaItem(MediaItem newMediaItem) {
-    if (!enableBackgroundPlay) return;
+    if (_taskRemoved || !enableBackgroundPlay) return;
     // if (kDebugMode) {
     //   debugPrint("此时调用栈为：");
     //   debugPrint(newMediaItem);
@@ -130,7 +175,7 @@ class VideoPlayerServiceHandler extends BaseAudioHandler with SeekHandler {
     required double speed,
     String? debugLabel,
   }) {
-    if (!enableBackgroundPlay || _item.isEmpty) {
+    if (_taskRemoved || !enableBackgroundPlay || _item.isEmpty) {
       return;
     }
 
@@ -229,7 +274,7 @@ class VideoPlayerServiceHandler extends BaseAudioHandler with SeekHandler {
     String? artist,
     String? cover,
   }) {
-    if (!enableBackgroundPlay) return;
+    if (_taskRemoved || !enableBackgroundPlay) return;
     // if (kDebugMode) {
     //   debugPrint('当前调用栈为：');
     //   debugPrint(StackTrace.current);
@@ -316,7 +361,7 @@ class VideoPlayerServiceHandler extends BaseAudioHandler with SeekHandler {
   }
 
   void onVideoDetailDispose(String herotag) {
-    if (!enableBackgroundPlay) return;
+    if (_taskRemoved || !enableBackgroundPlay) return;
 
     if (_item.isNotEmpty) {
       _item.removeWhere((item) => item.id.endsWith(herotag));
@@ -334,8 +379,8 @@ class VideoPlayerServiceHandler extends BaseAudioHandler with SeekHandler {
     if (_item.isEmpty) clear();
   }
 
-  void clear() {
-    if (!enableBackgroundPlay) return;
+  void clear({bool force = false}) {
+    if (!force && (_taskRemoved || !enableBackgroundPlay)) return;
     mediaItem.add(null);
     _item.clear();
     _lastPos = null;

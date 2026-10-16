@@ -1,12 +1,21 @@
 package com.example.piliplus
 
+import android.content.Context
 import android.content.res.Configuration
 import android.os.Build
 import android.os.Bundle
 import android.view.WindowManager.LayoutParams
-import com.ryanheise.audioservice.AudioServiceActivity
+import com.ryanheise.audioservice.AudioServicePlugin
+import io.flutter.embedding.android.FlutterActivity
+import io.flutter.embedding.engine.FlutterEngine
 
-class MainActivity : AudioServiceActivity() {
+class MainActivity : FlutterActivity() {
+    // Retain the audio_service engine without AudioServiceActivity's unconditional
+    // stop() in onDestroy(). The real onTaskRemoved callback must finish Dart/mpv
+    // cleanup before the handler publishes idle and lets the service stop.
+    override fun provideFlutterEngine(context: Context): FlutterEngine =
+        AudioServicePlugin.getFlutterEngine(context)
+
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
         if (AndroidHelper.isFoldable) {

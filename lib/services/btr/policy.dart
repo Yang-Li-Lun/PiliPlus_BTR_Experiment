@@ -2,14 +2,12 @@ import 'dart:io';
 
 enum BtrMode {
   original('原始 PiliPlus'),
-  threaded('僅線程撕裂者'),
-  switcher('僅 CDN Switcher'),
-  combined('整合模式');
+  combined('BTR 整合加速');
 
   const BtrMode(this.label);
   final String label;
-  bool get usesThreads => this == BtrMode.threaded || this == BtrMode.combined;
-  bool get usesSwitcher => this == BtrMode.switcher || this == BtrMode.combined;
+  bool get usesThreads => this == BtrMode.combined;
+  bool get usesSwitcher => this == BtrMode.combined;
 
   static BtrMode parse(Object? value) => values.firstWhere(
     (mode) => mode.name == value,
@@ -73,7 +71,11 @@ class BtrSourcePolicy {
     return RegExp(r'\.(m4s|mp4)$', caseSensitive: false).hasMatch(uri.path);
   }
 
-  static List<Uri> candidates(BtrTrackSpec spec, BtrMode mode) {
+  static List<Uri> candidates(
+    BtrTrackSpec spec,
+    BtrMode mode, {
+    String? preferredHost,
+  }) {
     final originals = spec.urls
         .map(Uri.tryParse)
         .whereType<Uri>()
@@ -85,11 +87,15 @@ class BtrSourcePolicy {
       (u) => !u.host.endsWith('.akamaized.net'),
       orElse: () => originals.first,
     );
-    final hosts = mode.usesSwitcher ? switcherHosts : btrHosts;
+    // A preference only reorders the existing admissible pool. It cannot add a
+    // host, bypass eligibility, or authorize cross-origin composition.
+    final hosts = [
+      if (switcherHosts.contains(preferredHost)) preferredHost!,
+      ...switcherHosts.where((h) => h != preferredHost),
+    ];
     final synthetic = hosts.map((h) => donor.replace(host: h, port: 443));
     // Selection happens once here; no subsequent VideoUtils URL rewrite.
     return <Uri>{
-      if (!mode.usesSwitcher) ...originals.take(2),
       ...synthetic,
       ...originals,
     }.take(12).toList();

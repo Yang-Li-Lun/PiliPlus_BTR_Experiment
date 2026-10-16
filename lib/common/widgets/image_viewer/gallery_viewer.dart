@@ -16,6 +16,10 @@
  */
 
 import 'dart:async';
+
+import 'package:PiliPlus/services/playback_task_scope.dart';
+import 'package:PiliPlus/services/player_disposal.dart';
+
 import 'dart:io' show File, Platform;
 
 import 'package:PiliPlus/common/widgets/colored_box_transition.dart';
@@ -86,6 +90,12 @@ class _GalleryViewerState extends State<GalleryViewer>
 
   late bool _hasInit = false;
   Player? _player;
+  late final _taskScope = PlaybackTaskScope(
+    onClose: () {
+      _player = null;
+      _videoController = null;
+    },
+  );
   VideoController? _videoController;
 
   late final PageController _pageController;
@@ -115,10 +125,21 @@ class _GalleryViewerState extends State<GalleryViewer>
 
   Future<void> _initPlayer() async {
     assert(_player == null);
-    final player = await Player.create();
-    _videoController = await VideoController.create(player);
+    final player = await _taskScope.acquire(() async {
+      final player = await Player.create();
+      if (_taskScope.closed) return player;
+      try {
+        final controller = await VideoController.create(player);
+        if (!_taskScope.closed) _videoController = controller;
+      } catch (_) {
+        await disposePlaybackPlayer(player);
+        rethrow;
+      }
+      return player;
+    }, disposePlaybackPlayer);
+    if (player == null || _taskScope.closed) return;
     if (!mounted) {
-      player.dispose();
+      await _taskScope.release(player);
       _videoController = null;
       return;
     }
@@ -288,9 +309,7 @@ class _GalleryViewerState extends State<GalleryViewer>
 
   @override
   void dispose() {
-    _player?.dispose();
-    _player = null;
-    _videoController = null;
+    _taskScope.close();
     _pageController.dispose();
     _animateController.dispose();
     _tapGestureRecognizer.dispose();
@@ -386,6 +405,7 @@ class _GalleryViewerState extends State<GalleryViewer>
   );
 
   void _playIfNeeded(SourceModel item) {
+    if (_taskScope.closed) return;
     if (item.sourceType == .livePhoto) {
       if (_player != null) {
         _player!.open(Media(item.liveUrl!));

@@ -27,6 +27,7 @@ import 'package:PiliPlus/pages/common/common_intro_controller.dart';
 import 'package:PiliPlus/pages/danmaku/danmaku_model.dart';
 import 'package:PiliPlus/pages/setting/models/play_settings.dart'
     show showPlayerVolumeDialog;
+import 'package:PiliPlus/pages/setting/pages/btr_experiment.dart';
 import 'package:PiliPlus/pages/setting/widgets/popup_item.dart';
 import 'package:PiliPlus/pages/setting/widgets/select_dialog.dart';
 import 'package:PiliPlus/pages/video/controller.dart';
@@ -379,6 +380,20 @@ class HeaderControlState extends State<HeaderControl>
             child: ListView(
               padding: const EdgeInsets.symmetric(vertical: 14),
               children: [
+                if (Platform.isAndroid)
+                  ListTile(
+                    dense: true,
+                    leading: const Icon(Icons.speed, size: 20),
+                    title: const Text('BTR 功能設定與監控', style: titleStyle),
+                    onTap: () {
+                      Get.back();
+                      Navigator.of(this.context).push(
+                        MaterialPageRoute(
+                          builder: (_) => const BtrExperimentPage(),
+                        ),
+                      );
+                    },
+                  ),
                 ListTile(
                   dense: true,
                   onTap: () {

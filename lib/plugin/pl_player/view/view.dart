@@ -28,6 +28,7 @@ import 'package:PiliPlus/models_new/video/video_detail/episode.dart' as ugc;
 import 'package:PiliPlus/models_new/video/video_detail/ugc_season.dart';
 import 'package:PiliPlus/pages/common/common_intro_controller.dart';
 import 'package:PiliPlus/pages/danmaku/danmaku_model.dart';
+import 'package:PiliPlus/pages/setting/widgets/btr_monitor.dart';
 import 'package:PiliPlus/pages/live_room/widgets/bottom_control.dart'
     as live_bottom;
 import 'package:PiliPlus/pages/video/controller.dart';
@@ -1590,6 +1591,25 @@ class _PLVideoPlayerState extends State<PLVideoPlayer>
             ),
           ),
         ),
+
+        // A passive monitor must never capture player gestures.
+        if (Platform.isAndroid && !isLive)
+          Positioned(
+            top: 52,
+            left: 12,
+            right: 12,
+            child: IgnorePointer(
+              child: RepaintBoundary(
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: BtrMonitor(
+                    session: () => plPlayerController.btrPlayback,
+                    compact: true,
+                  ),
+                ),
+              ),
+            ),
+          ),
 
         // 头部、底部控制条
         Positioned.fill(

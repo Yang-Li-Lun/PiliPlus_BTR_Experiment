@@ -28,9 +28,9 @@ import 'package:material_ui/material_ui.dart';
 List<SettingsModel> get playSettings => [
   if (Platform.isAndroid)
     NormalModel(
-      title: 'BTR Android 實驗',
-      subtitle: '四種傳輸模式與播放比較紀錄',
-      leading: const Icon(Icons.science_outlined),
+      title: 'BTR 功能設定',
+      subtitle: '整合加速、線程與 CDN 偏好、即時監控',
+      leading: const Icon(Icons.speed),
       onTap: (context, setState) => Navigator.of(context).push(
         MaterialPageRoute(builder: (_) => const BtrExperimentPage()),
       ),

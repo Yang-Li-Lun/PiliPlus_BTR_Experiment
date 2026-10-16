@@ -30,6 +30,8 @@ import 'package:PiliPlus/plugin/pl_player/controller.dart';
 import 'package:PiliPlus/plugin/pl_player/models/play_repeat.dart';
 import 'package:PiliPlus/plugin/pl_player/models/play_status.dart';
 import 'package:PiliPlus/services/service_locator.dart';
+import 'package:PiliPlus/services/playback_task_scope.dart';
+import 'package:PiliPlus/services/player_disposal.dart';
 import 'package:PiliPlus/services/shutdown_timer_service.dart';
 import 'package:PiliPlus/utils/accounts.dart';
 import 'package:PiliPlus/utils/android/android_helper.dart';
@@ -72,6 +74,7 @@ class AudioController extends GetxController
   final audioItem = Rxn<DetailItem>();
 
   bool _hasInit = false;
+  late final _taskScope = PlaybackTaskScope(onClose: _stopPlayback);
   @override
   Player? player;
   late int cacheAudioQa;
@@ -156,6 +159,7 @@ class AudioController extends GetxController
 
   @override
   void onInit() {
+    if (_taskScope.closed) return;
     super.onInit();
     final args = Get.arguments;
     oid = Int64(args['oid']);
@@ -363,7 +367,11 @@ class AudioController extends GetxController
     String? referer,
     http_model.Volume? volume,
   }) async {
+    if (_taskScope.closed) return;
+    await videoPlayerServiceHandler?.beginPlayback();
+    if (_taskScope.closed) return;
     await _initPlayerIfNeeded();
+    if (_taskScope.closed) return;
     final extras = audioFilterExtras(volume);
     player
       ?..setMediaHeader(
@@ -377,6 +385,7 @@ class AudioController extends GetxController
 
   PlayerStatus _playerStatus = .paused;
   void _updatePlaybackState({Duration? position, String? debugLabel}) {
+    if (_taskScope.closed || player == null) return;
     videoPlayerServiceHandler?.onUpdateState(
       _playerStatus,
       false,
@@ -388,23 +397,30 @@ class AudioController extends GetxController
   }
 
   Future<void> _initPlayerIfNeeded() async {
-    if (_hasInit) return;
+    if (_taskScope.closed || _hasInit) return;
     _hasInit = true;
     assert(player == null, _subscriptions = null);
-    player = await Player.create(
-      configuration: PlayerConfiguration(
-        options: {
-          if (Platform.isAndroid) 'ao': Pref.audioOutput,
-          'volume': PlatformUtils.isDesktop
-              ? (desktopVolume.value * 100).toString()
-              : Pref.playerVolume.toString(),
-          ...Pref.initBuffer(),
-        },
+    player = await _taskScope.acquire(
+      () => Player.create(
+        configuration: PlayerConfiguration(
+          options: {
+            if (Platform.isAndroid) 'ao': Pref.audioOutput,
+            'volume': PlatformUtils.isDesktop
+                ? (desktopVolume.value * 100).toString()
+                : Pref.playerVolume.toString(),
+            ...Pref.initBuffer(),
+          },
+        ),
       ),
+      disposePlaybackPlayer,
     );
-    if (isClosed) {
-      player!.dispose();
+    if (_taskScope.closed) {
       player = null;
+      return;
+    }
+    if (player == null) return;
+    if (isClosed) {
+      await _taskScope.close();
       return;
     }
     final stream = player!.stream;
@@ -834,13 +850,22 @@ class AudioController extends GetxController
       ..onSkipToPrevious = null
       ..onVideoDetailDispose(hashCode.toString())
       ..clearIfNeeded();
-    _subscriptions?.forEach((e) => e.cancel());
-    _subscriptions?.clear();
-    _subscriptions = null;
-    player?.dispose();
-    player = null;
+    _taskScope.close();
     animController.dispose();
     super.onClose();
+  }
+
+  Future<void> _stopPlayback() {
+    _stopStatusTimer();
+    shutdownTimerService
+      ..onPause = null
+      ..isPlaying = null
+      ..reset();
+    final cancelled = _subscriptions?.map((e) => e.cancel()).toList();
+    _subscriptions?.clear();
+    _subscriptions = null;
+    player = null;
+    return Future.wait(cancelled ?? []);
   }
 }
 

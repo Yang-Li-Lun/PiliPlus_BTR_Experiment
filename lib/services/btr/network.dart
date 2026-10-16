@@ -69,6 +69,7 @@ class BtrNetwork {
       ..maxConnectionsPerHost = 1;
     HttpClientRequest? request;
     final unlink = token.listen(() {
+      metrics.upstreamCancellations++;
       request?.abort(const BtrCancelled());
       client.close(force: true);
     });
@@ -182,7 +183,7 @@ class BtrNetwork {
       var offset = 0;
       while (await scope.bind(reader.moveNext().timeout(stallTimeout))) {
         final bytes = reader.current;
-        metrics.networkBytes += bytes.length;
+        metrics.received(audio ? 'audio' : 'video', bytes.length);
         if (offset + bytes.length > size) {
           throw const BtrFailure('body-overrun');
         }

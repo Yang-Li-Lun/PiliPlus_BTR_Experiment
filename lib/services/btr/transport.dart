@@ -10,6 +10,7 @@ import 'package:PiliPlus/services/btr/metrics.dart';
 import 'package:PiliPlus/services/btr/network.dart';
 import 'package:PiliPlus/services/btr/policy.dart';
 import 'package:PiliPlus/services/btr/scheduler.dart';
+import 'package:PiliPlus/services/btr/settings.dart';
 
 class _PieceResult {
   const _PieceResult(this.bytes, this.error);
@@ -41,6 +42,8 @@ class BtrTrack {
   BtrSample? sample;
   Future<void>? _initializing;
   bool terminal = false;
+  String selectionState = 'pending';
+  String? lastFailure;
   int _hedges = 0;
   int peakReservedBytes = 0;
   final health = <String, Map<String, Object>>{};
@@ -48,6 +51,7 @@ class BtrTrack {
   Future<void> initialize() => _initializing ??= _discover();
 
   Future<void> _discover() async {
+    selectionState = 'selecting';
     // At most 9 candidates, three at a time, no periodic CDN traffic.
     for (var base = 0; base < math.min(9, candidates.length); base += 3) {
       lifetime.check();
@@ -66,10 +70,8 @@ class BtrTrack {
         tasks.add(() async {
           try {
             if (index > 0) {
-              await tokens[index].bind(
-                Future<void>.delayed(
-                  Duration(milliseconds: index == 1 ? 120 : 300),
-                ),
+              await tokens[index].delay(
+                Duration(milliseconds: index == 1 ? 120 : 300),
               );
             }
             final s = await network.sample(
@@ -85,9 +87,18 @@ class BtrTrack {
           } catch (error) {
             if (error is! BtrCancelled) {
               metrics.failures++;
+              metrics.discoveryFailures++;
               health[batch[index].host] = {
                 'state': 'quarantined-for-session',
               };
+              lastFailure = error is BtrFailure ? error.code : 'io-or-timeout';
+              metrics.event('source-failed', {
+                'track': spec.kind,
+                'host': batch[index].host,
+                'reason': lastFailure!,
+                if (error is BtrFailure && error.status != null)
+                  'status': error.status!,
+              });
             }
             failed++;
             if (failed == batch.length && !winner.isCompleted) {
@@ -108,6 +119,7 @@ class BtrTrack {
         unlink();
       }
       if (sample != null) {
+        selectionState = 'selected';
         metrics.event('source-locked', {
           'track': spec.kind,
           'host': sample!.identity.uri.host,
@@ -119,12 +131,15 @@ class BtrTrack {
       }
     }
     terminal = true;
+    selectionState = 'failed';
+    lastFailure = 'no-validated-source';
     throw const BtrFailure('no-validated-source');
   }
 
   void cancelDemand() {
     if (_request != null && !_request!.cancelled) {
       metrics.cancellations++;
+      metrics.event('demand-cancelled', {'track': spec.kind});
       _request!.cancel();
     }
   }
@@ -205,7 +220,9 @@ class BtrTrack {
     } catch (error) {
       if (!token.cancelled && error is! BtrCancelled) {
         metrics.failures++;
+        metrics.terminalFailures++;
         terminal = true; // one exhausted transfer ends this representation
+        lastFailure = error is BtrFailure ? error.code : 'io-or-timeout';
         metrics.event('transfer-ended', {
           'track': spec.kind,
           'reason': error is BtrFailure ? error.code : 'io-or-timeout',
@@ -235,7 +252,7 @@ class BtrTrack {
   }
 
   Stream<Uint8List> _direct(BtrRange range, BtrCancel token) async* {
-    // Switcher-only and weak/no-validator fallback use one unsegmented response.
+    // Weak/no-validator fallback uses one unsegmented response.
     final id = sample!.identity;
     BtrHttpLease? lease;
     StreamIterator<List<int>>? reader;
@@ -256,13 +273,19 @@ class BtrTrack {
         reader.moveNext().timeout(network.stallTimeout),
       )) {
         final data = reader.current;
-        metrics.networkBytes += data.length;
+        metrics.received(spec.kind, data.length);
         count += data.length;
         if (count > range.length) throw const BtrFailure('body-overrun');
         yield Uint8List.fromList(data);
       }
       if (count != range.length) throw const BtrFailure('body-short');
       complete = true;
+    } catch (error) {
+      if (!token.cancelled && error is! BtrCancelled) {
+        metrics.failures++;
+        metrics.requestFailures++;
+      }
+      rethrow;
     } finally {
       await reader?.cancel();
       await lease?.close(reusable: complete);
@@ -277,7 +300,8 @@ class BtrTrack {
     final queue = Queue<(BtrRange, Future<_PieceResult>)>();
     void fill() {
       // Keep distant speculative data bounded even if the head stalls.
-      while (cursor <= range.end && queue.length < owner.scheduler.limit - 2) {
+      while (cursor <= range.end &&
+          queue.length < math.max(1, owner.scheduler.limit - 2)) {
         final size = cursor == range.start ? 65536 : adaptive.pieceSize;
         final end = math.min(cursor + size - 1, range.end);
         final piece = BtrRange(cursor, end);
@@ -349,9 +373,10 @@ class BtrTrack {
       for (var round = 0; round < 3; round++) {
         scope.check();
         if (round > 0) {
-          await scope.bind(
-            Future<void>.delayed(Duration(milliseconds: 500 * round)),
-          );
+          await scope.delay(Duration(milliseconds: 500 * round));
+          scope.check();
+          metrics.retries++;
+          metrics.event('retry', {'track': spec.kind, 'round': round});
         }
         final mainToken = BtrCancel();
         final hedgeToken = BtrCancel();
@@ -431,6 +456,7 @@ class BtrTrack {
           hedgeStarted = true;
           _hedges++;
           metrics.hedges++;
+          metrics.event('hedge', {'track': spec.kind});
           final kept =
               main.validated &&
                   main.received >= 32768 &&
@@ -439,7 +465,6 @@ class BtrTrack {
               : 0;
           final bytes = Uint8List(range.length);
           if (kept > 0) bytes.setRange(0, kept, main.data);
-          metrics.resumedBytes += kept;
           hedge = _Attempt(bytes, kept);
           launch(hedge!, hedgeToken, true);
         });
@@ -455,7 +480,6 @@ class BtrTrack {
               best.received >= 32768 &&
               best.received < range.length) {
             prefix = Uint8List.fromList(best.data.sublist(0, best.received));
-            metrics.resumedBytes += prefix.length;
           } else {
             prefix = null;
           }
@@ -511,6 +535,14 @@ class BtrTrack {
         priority: priority,
         etag: id.etag,
         onStarted: () {
+          if (before > 0) {
+            metrics.resumes++;
+            metrics.resumedBytes += before;
+            metrics.event('resume', {
+              'track': spec.kind,
+              'prefixBytes': before,
+            });
+          }
           attempt.started = attempt.progress =
               DateTime.now().millisecondsSinceEpoch;
         },
@@ -527,7 +559,7 @@ class BtrTrack {
         reader.moveNext().timeout(network.stallTimeout),
       )) {
         final bytes = reader.current;
-        metrics.networkBytes += bytes.length;
+        metrics.received(spec.kind, bytes.length);
         if (attempt.received + bytes.length > piece.length) {
           throw const BtrFailure('body-overrun');
         }
@@ -552,6 +584,14 @@ class BtrTrack {
     } catch (error) {
       if (!token.cancelled) {
         metrics.failures++;
+        metrics.requestFailures++;
+        lastFailure = error is BtrFailure ? error.code : 'io-or-timeout';
+        metrics.event('request-failed', {
+          'track': spec.kind,
+          'reason': lastFailure!,
+          if (error is BtrFailure && error.status != null)
+            'status': error.status!,
+        });
         if (error is BtrFailure &&
             (error.status == 412 || error.status == 429)) {
           adaptive.pushback();
@@ -570,6 +610,11 @@ class BtrTrack {
     lifetime.cancel();
     cancelDemand();
     await Future.wait(_jobs.toList());
+    try {
+      await _initializing;
+    } catch (_) {
+      // Discovery failures/cancellation are already delivered to initialize().
+    }
   }
 }
 
@@ -580,13 +625,22 @@ class BtrTransport {
     Map<String, String> headers = const {},
     BtrNetwork? network,
     BtrScheduler? scheduler,
-  }) : scheduler = scheduler ?? BtrScheduler() {
+    this.settings = const BtrSettings(),
+  }) : scheduler =
+           scheduler ??
+           BtrScheduler(
+             limit: settings.autoConcurrency ? 8 : settings.manualThreads,
+           ) {
+    if (!settings.autoConcurrency) {
+      this.scheduler.limit = settings.manualThreads;
+    }
     this.network =
         network ?? BtrNetwork(this.scheduler, metrics, headers: headers);
-    adaptive = BtrAdaptive(this.scheduler);
+    adaptive = BtrAdaptive(this.scheduler, automatic: settings.autoConcurrency);
   }
   final BtrMode mode;
   final BtrMetrics metrics;
+  final BtrSettings settings;
   final BtrScheduler scheduler;
   late final BtrNetwork network;
   late final BtrAdaptive adaptive;
@@ -599,23 +653,41 @@ class BtrTransport {
     (_) => math.Random.secure().nextInt(256),
   ).map((b) => b.toRadixString(16).padLeft(2, '0')).join();
   bool _closed = false;
+  Future<Map<String, String>>? _starting;
+  Future<void>? _closing;
 
-  Future<Map<String, String>> start(List<BtrTrackSpec> specs) async {
+  Future<Map<String, String>> start(List<BtrTrackSpec> specs) {
+    if (_closed) return Future.error(const BtrCancelled());
+    return _starting ??= _start(specs);
+  }
+
+  Future<Map<String, String>> _start(List<BtrTrackSpec> specs) async {
+    if (_closed) throw const BtrCancelled();
     if (mode == BtrMode.original) {
       throw StateError('Original bypasses the proxy');
     }
-    _server = await HttpServer.bind(
+    final server = await HttpServer.bind(
       InternetAddress.loopbackIPv4,
       0,
       shared: false,
     );
+    if (_closed) {
+      await server.close(force: true);
+      throw const BtrCancelled();
+    }
+    _server = server;
     _server!.autoCompress = false;
     final result = <String, String>{};
     for (final spec in specs) {
-      final urls = BtrSourcePolicy.candidates(spec, mode);
+      final urls = BtrSourcePolicy.candidates(
+        spec,
+        mode,
+        preferredHost: settings.preferredCdn,
+      );
       // A selected DASH representation with no admissible source fails closed.
       // Never reintroduce excluded MCDN/P2P through a silent native fallback.
       tracks[spec.kind] = BtrTrack(spec, urls, this);
+      metrics.registerTrack(spec.kind);
       result[spec.kind] =
           'http://127.0.0.1:${_server!.port}/$_capability/${spec.kind}';
     }
@@ -670,12 +742,62 @@ class BtrTransport {
     }
   }
 
-  Future<void> close() async {
-    if (_closed) return;
+  Map<String, Object?> snapshot() => {
+    'activeConnections': scheduler.active,
+    'videoConnections': tracks.containsKey('video')
+        ? scheduler.videoActive
+        : null,
+    'audioConnections': tracks.containsKey('audio')
+        ? scheduler.audioActive
+        : null,
+    'queuedConnections': scheduler.queued,
+    'peakConnections': scheduler.peak,
+    'concurrencyLimit': scheduler.limit,
+    'configuredConcurrencyLimit': settings.autoConcurrency
+        ? 16
+        : settings.manualThreads,
+    'resourceConcurrencyLimit': BtrScheduler.resourceLimit,
+    'autoConcurrency': settings.autoConcurrency,
+    'preferredCdn': settings.preferredCdn,
+    'tracks': tracks.values
+        .map(
+          (t) => {
+            'kind': t.spec.kind,
+            'host': t.sample?.identity.uri.host,
+            'selection': t.selectionState,
+            'lastFailure': t.lastFailure,
+            'identity': t.sample == null
+                ? 'pending'
+                : t.sample!.identity.canSegment
+                ? 'single-origin-strong-etag'
+                : 'single-response',
+            'peakOrderedReservationBytes': t.peakReservedBytes,
+            'terminal': t.terminal,
+            'health': {
+              for (final e in t.health.entries)
+                e.key: Map<String, Object>.of(e.value),
+            },
+          },
+        )
+        .toList(),
+  };
+
+  Future<void> close() {
+    if (_closing case final closing?) return closing;
     _closed = true;
+    return _closing = _closeResources();
+  }
+
+  Future<void> _closeResources() async {
     final cleanup = tracks.values.map((t) => t.close()).toList();
     network.close();
     await _server?.close(force: true);
+    // bind() may still be pending. _start closes its late server before failing.
+    try {
+      await _starting;
+    } catch (_) {
+      // Cancellation/start failure is observed by start's caller.
+    }
     await Future.wait(cleanup);
     await Future.wait(_handlers.toList());
   }

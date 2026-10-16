@@ -3,23 +3,26 @@ import 'dart:async';
 import 'package:PiliPlus/services/btr/metrics.dart';
 import 'package:PiliPlus/services/btr/policy.dart';
 import 'package:PiliPlus/services/btr/scheduler.dart';
+import 'package:PiliPlus/services/btr/settings.dart';
+import 'package:PiliPlus/services/btr/transport.dart';
 import 'package:matcher/expect.dart';
 import 'package:test_api/scaffolding.dart';
 
 void main() {
   test(
-    'all four modes preserve independent routing flags and stable settings',
+    'two modes retain original bypass and migrate both retired modes',
     () {
       expect(BtrMode.values.map((m) => (m.usesThreads, m.usesSwitcher)), [
         (false, false),
-        (true, false),
-        (false, true),
         (true, true),
       ]);
       for (final mode in BtrMode.values) {
         expect(BtrMode.parse(mode.name), mode);
       }
       expect(BtrMode.parse(null), BtrMode.combined);
+      expect(BtrMode.parse('threaded'), BtrMode.combined);
+      expect(BtrMode.parse('switcher'), BtrMode.combined);
+      expect(BtrMode.parse('original'), BtrMode.original);
     },
   );
   test(
@@ -35,7 +38,7 @@ void main() {
           'https://evil.invalid/a/video.m4s',
         ],
       );
-      for (final mode in [BtrMode.switcher, BtrMode.combined]) {
+      for (final mode in [BtrMode.combined]) {
         final sources = BtrSourcePolicy.candidates(spec, mode);
         expect(
           sources.map((s) => s.host).take(3),
@@ -49,13 +52,61 @@ void main() {
           isTrue,
         );
       }
-      expect(
-        BtrSourcePolicy.candidates(spec, BtrMode.threaded).first.toString(),
-        original,
-      );
       expect(BtrSourcePolicy.candidates(spec, BtrMode.original).length, 1);
     },
   );
+  for (final count in BtrSettings.threadChoices) {
+    test(
+      'manual $count controls real permits and keeps the resource cap',
+      () async {
+        final transport = BtrTransport(
+          mode: BtrMode.combined,
+          metrics: BtrMetrics(BtrMode.combined),
+          settings: BtrSettings(autoConcurrency: false, manualThreads: count),
+        );
+        final scheduler = transport.scheduler;
+        final effective = count.clamp(2, BtrScheduler.resourceLimit);
+        expect(scheduler.limit, effective);
+        final token = BtrCancel();
+        final grants = <void Function()>[];
+        for (var i = 0; i < effective - 1; i++) {
+          grants.add(
+            await scheduler.acquire(token, audio: false, priority: () => 1),
+          );
+        }
+        final pending = scheduler.acquire(
+          token,
+          audio: false,
+          priority: () => 1,
+        );
+        final observed = expectLater(pending, throwsA(isA<BtrCancelled>()));
+        final audio = await scheduler.acquire(
+          token,
+          audio: true,
+          priority: () => 1,
+        );
+        expect(scheduler.active, effective);
+        expect(transport.snapshot()['configuredConcurrencyLimit'], count);
+        transport.adaptive
+          ..delivered(100000)
+          ..demand(playing: true, buffering: true, ahead: 0);
+        expect(scheduler.limit, effective); // Manual never auto-escalates.
+        transport.adaptive.pushback();
+        expect(scheduler.limit, effective ~/ 2);
+        transport.adaptive.pushback();
+        expect(scheduler.limit, effective ~/ 2); // Refusal batch cooldown.
+        token.cancel();
+        for (final release in grants) {
+          release();
+        }
+        audio();
+        await observed;
+        await transport.close();
+        expect(scheduler.active, 0);
+        expect(scheduler.queued, 0);
+      },
+    );
+  }
   test(
     'reject peer sources, HTTP, redirects targets, credentials and non-media',
     () {

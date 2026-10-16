@@ -6,6 +6,7 @@ import 'package:PiliPlus/services/btr/metrics.dart';
 import 'package:PiliPlus/services/btr/policy.dart';
 import 'package:PiliPlus/services/btr/scheduler.dart';
 import 'package:PiliPlus/services/btr/transport.dart';
+import 'package:PiliPlus/services/btr/settings.dart';
 import 'package:test_api/scaffolding.dart';
 import 'package:matcher/expect.dart';
 
@@ -26,12 +27,14 @@ void main() {
     bool audio = false,
     bool peerOnly = false,
     Duration stall = const Duration(milliseconds: 150),
+    BtrSettings settings = const BtrSettings(),
   }) async {
     metrics = BtrMetrics(mode);
     scheduler = BtrScheduler();
     transport = BtrTransport(
       mode: mode,
       metrics: metrics,
+      settings: settings,
       scheduler: scheduler,
       network: FakeNetwork(scheduler, metrics, cdn, stallTimeout: stall),
     );
@@ -242,16 +245,17 @@ void main() {
   }
 
   test(
-    'switcher-only selects preferred host but keeps a single streaming request',
+    'CDN preference selects a validated source while retaining segmented transport',
     () async {
-      await start(mode: BtrMode.switcher);
+      const preferred = 'upos-sz-mirrorcos.bilivideo.com';
+      await start(settings: const BtrSettings(preferredCdn: preferred));
       expect(await fetchLocal(urls['video']!), orderedEquals(data));
       expect(
         transport.tracks['video']!.sample!.identity.uri.host,
-        BtrSourcePolicy.preferred,
+        preferred,
       );
-      expect(cdn.requests.length, 2);
-      expect(transport.tracks['video']!.peakReservedBytes, 0);
+      expect(cdn.requests.length, greaterThan(2));
+      expect(transport.tracks['video']!.peakReservedBytes, greaterThan(0));
     },
   );
 
@@ -392,4 +396,90 @@ void main() {
       await expectLater(fetchLocal(urls['video']!), throwsA(anything));
     },
   );
+
+  for (final count in [4, 128]) {
+    test(
+      'manual $count keeps byte correctness, refusal backoff and bounded cleanup',
+      () async {
+        var refused = false;
+        cdn.handler = (r, range, n) async {
+          if (range.start > 0 && !refused) {
+            refused = true;
+            r.response.statusCode = 429;
+            await r.response.close();
+            return true;
+          }
+          return false;
+        };
+        await start(
+          audio: true,
+          settings: BtrSettings(autoConcurrency: false, manualThreads: count),
+        );
+        final results = await Future.wait([
+          fetchLocal(urls['video']!),
+          fetchLocal(urls['audio']!),
+        ]);
+        for (final result in results) {
+          expect(result, orderedEquals(data));
+        }
+        await transport.settled;
+        expect(scheduler.limit, count.clamp(2, 16) ~/ 2);
+        expect(scheduler.peak, lessThanOrEqualTo(count.clamp(2, 16)));
+        expect(metrics.retries, greaterThan(0));
+        expect(metrics.requestFailures, greaterThan(0));
+        expect(metrics.deliveredByTrack, {
+          'video': data.length,
+          'audio': data.length,
+        });
+        expect(metrics.networkByTrack.keys, containsAll(['video', 'audio']));
+        final snapshot = transport.snapshot();
+        expect(snapshot['configuredConcurrencyLimit'], count);
+        expect(snapshot['activeConnections'], 0);
+        expect(snapshot['queuedConnections'], 0);
+        for (final track in transport.tracks.values) {
+          expect(track.peakReservedBytes, lessThanOrEqualTo(4 * 1024 * 1024));
+        }
+      },
+    );
+  }
+
+  test('failed user-preferred CDN uses validated fallback and reports failure without secrets', () async {
+    const preferred = 'upos-sz-mirrorcos.bilivideo.com';
+    cdn.handler = (r, range, n) async {
+      if (!r.uri.path.contains(preferred)) return false;
+      r.response.statusCode = 403;
+      await r.response.close();
+      return true;
+    };
+    await start(settings: const BtrSettings(preferredCdn: preferred));
+    expect(await fetchLocal(urls['video']!), orderedEquals(data));
+    expect(
+      transport.tracks['video']!.sample!.identity.uri.host,
+      isNot(preferred),
+    );
+    expect(transport.tracks['video']!.selectionState, 'selected');
+    expect(metrics.discoveryFailures, greaterThan(0));
+    final report = '${metrics.snapshot()} ${transport.snapshot()}';
+    expect(report, contains('source-failed'));
+    for (final secret in ['never-log', 'https://', 'Cookie', 'Authorization']) {
+      expect(report, isNot(contains(secret)));
+    }
+  });
+
+  test('original mode never creates a proxy or makes a CDN request', () async {
+    metrics = BtrMetrics(BtrMode.original);
+    transport = BtrTransport(mode: BtrMode.original, metrics: metrics);
+    await expectLater(
+      transport.start([
+        BtrTrackSpec(
+          kind: 'video',
+          urls: ['https://origin.bilivideo.com/video.m4s'],
+        ),
+      ]),
+      throwsStateError,
+    );
+    expect(transport.tracks, isEmpty);
+    expect(cdn.requests, isEmpty);
+    expect(metrics.snapshot()['networkBytesIncludingProbesAndHedges'], isNull);
+  });
 }
