@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "upstreamUrl": "https://github.com/bggRGjQaUbCoE/PiliPlus.git",
+  "upstreamRemote": "upstream",
+  "upstreamBranch": "main",
+  "upstreamMirror": "codex/upstream-piliplus",
+  "maintenanceBranch": "codex/btr-maintenance",
+  "stableBranch": "codex/btr-stable",
+  "initialUpstream": "3d0aed958b3b7e59c39c121196f189f429719904",
+  "initialFeatures": "f583de9e24871984470895bc71598773d28baab0",
+  "stableBaseline": "788faa8abee2ff325205d89a9fa24869821685e3",
+  "deviceAcceptance": "UNRESOLVED; preserve BTR_EXPERIMENT.md and historical evidence; Git/test/build success never promotes stable"
+}
