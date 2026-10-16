@@ -135,6 +135,18 @@ class VideoDetailController extends GetxController
   late VideoItem firstVideo;
   String? videoUrl;
   String? audioUrl;
+  List<String> _btrVideoUrls = const [];
+  List<String> _btrAudioUrls = const [];
+
+  String _dashUrl(Iterable<String> urls, {bool isAudio = false}) {
+    if (isAudio) {
+      _btrAudioUrls = urls.toList(growable: false);
+    } else {
+      _btrVideoUrls = urls.toList(growable: false);
+    }
+    return VideoUtils.getCdnUrl(urls, isAudio: isAudio);
+  }
+
   Duration? defaultST;
   Duration? playedTime;
   String playedTimePos(bool hasParams) {
@@ -697,7 +709,7 @@ class VideoDetailController extends GetxController
       ..buffered.value = 0;
 
     firstVideo = findVideoByQa(currentVideoQa.code, setCodecs: true);
-    videoUrl = VideoUtils.getCdnUrl(firstVideo.playUrls);
+    videoUrl = _dashUrl(firstVideo.playUrls);
 
     /// 根据currentAudioQa 重新设置audioUrl
     if (currentAudioQa != null) {
@@ -705,7 +717,7 @@ class VideoDetailController extends GetxController
         (i) => i.id == currentAudioQa!.code,
         orElse: () => data.dash!.audio!.first,
       );
-      audioUrl = VideoUtils.getCdnUrl(firstAudio.playUrls, isAudio: true);
+      audioUrl = _dashUrl(firstAudio.playUrls, isAudio: true);
     }
 
     playerInit();
@@ -742,6 +754,10 @@ class VideoDetailController extends GetxController
           : NetworkSource(
               videoSource: videoUrl!,
               audioSource: audioUrl,
+              videoCandidates: data.dash == null ? const [] : _btrVideoUrls,
+              audioCandidates: data.dash == null || (audioUrl?.isEmpty ?? true)
+                  ? const []
+                  : _btrAudioUrls,
             ),
       seekTo: seek,
       duration: data.timeLength == null
@@ -966,7 +982,7 @@ class VideoDetailController extends GetxController
       );
       _setVideoHeight();
 
-      videoUrl = VideoUtils.getCdnUrl(firstVideo.playUrls);
+      videoUrl = _dashUrl(firstVideo.playUrls);
 
       /// 优先顺序 设置中指定质量 -> 当前可选的最高质量
       AudioItem? firstAudio;
@@ -985,7 +1001,7 @@ class VideoDetailController extends GetxController
           (e) => e.id == closestNumber,
           orElse: () => audioList.first,
         );
-        audioUrl = VideoUtils.getCdnUrl(firstAudio.playUrls, isAudio: true);
+        audioUrl = _dashUrl(firstAudio.playUrls, isAudio: true);
         currentAudioQa = AudioQuality.fromCode(firstAudio.id);
       } else {
         audioUrl = '';
@@ -1561,6 +1577,8 @@ class VideoDetailController extends GetxController
               Get.back();
               this.videoUrl = videoUrl;
               this.audioUrl = audioUrl;
+              _btrVideoUrls = const [];
+              _btrAudioUrls = const [];
               playerInit();
             },
             child: const Text('确定'),

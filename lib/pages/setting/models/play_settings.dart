@@ -4,6 +4,7 @@ import 'package:PiliPlus/common/widgets/custom_icon.dart';
 import 'package:PiliPlus/models/common/super_chat_type.dart';
 import 'package:PiliPlus/models/common/video/subtitle_pref_type.dart';
 import 'package:PiliPlus/pages/setting/models/model.dart';
+import 'package:PiliPlus/pages/setting/pages/btr_experiment.dart';
 import 'package:PiliPlus/pages/setting/pages/fullscreen_sc_size.dart';
 import 'package:PiliPlus/pages/setting/widgets/select_dialog.dart';
 import 'package:PiliPlus/pages/setting/widgets/slider_dialog.dart';
@@ -25,6 +26,15 @@ import 'package:material_design_icons_flutter/material_design_icons_flutter.dart
 import 'package:material_ui/material_ui.dart';
 
 List<SettingsModel> get playSettings => [
+  if (Platform.isAndroid)
+    NormalModel(
+      title: 'BTR Android 實驗',
+      subtitle: '四種傳輸模式與播放比較紀錄',
+      leading: const Icon(Icons.science_outlined),
+      onTap: (context, setState) => Navigator.of(context).push(
+        MaterialPageRoute(builder: (_) => const BtrExperimentPage()),
+      ),
+    ),
   const SwitchModel(
     title: '弹幕开关',
     subtitle: '是否展示弹幕',

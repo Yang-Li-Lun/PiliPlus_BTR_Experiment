@@ -30,6 +30,7 @@ import 'package:PiliPlus/plugin/pl_player/models/video_fit_type.dart';
 import 'package:PiliPlus/plugin/pl_player/utils/danmaku_options.dart';
 import 'package:PiliPlus/plugin/pl_player/utils/fullscreen.dart';
 import 'package:PiliPlus/services/service_locator.dart';
+import 'package:PiliPlus/services/btr/playback.dart';
 import 'package:PiliPlus/utils/accounts.dart';
 import 'package:PiliPlus/utils/android/android_helper.dart';
 import 'package:PiliPlus/utils/android/bindings.g.dart';
@@ -74,6 +75,8 @@ typedef PlayCallback = Future<void>? Function();
 typedef PlayOwner = ({String tag, Type type});
 
 class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
+  BtrPlayback? _btrPlayback;
+  int _btrOpenGeneration = 0;
   Player? _videoPlayerController;
   VideoController? _videoController;
 
@@ -752,7 +755,7 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
         return;
       }
       // 配置Player 音轨、字幕等等
-      await _createVideoController(dataSource, seekTo, volume);
+      if (!await _createVideoController(dataSource, seekTo, volume)) return;
 
       if (_playerCount == 0) {
         _removeListeners();
@@ -884,11 +887,25 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
   late final liveBuffer = Pref.initLiveBuffer();
 
   // 配置播放器
-  Future<void> _createVideoController(
+  Future<bool> _createVideoController(
     DataSource dataSource,
     Duration? seekTo,
     Volume? volume,
   ) async {
+    final generation = ++_btrOpenGeneration;
+    final previousBtr = _btrPlayback;
+    _btrPlayback = null;
+    await previousBtr?.close();
+    final (session, preparedSource) = await BtrPlayback.prepare(
+      dataSource,
+      isLive,
+    );
+    if (generation != _btrOpenGeneration || _playerCount == 0) {
+      await session?.close();
+      return false;
+    }
+    _btrPlayback = session;
+    dataSource = preparedSource;
     isBuffering.value = false;
     _heartDuration = 0;
     danmakuController?.clear();
@@ -897,12 +914,13 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
 
     if (player == null) {
       player = await _initPlayer();
-      if (_playerCount == 0) {
+      if (_playerCount == 0 || generation != _btrOpenGeneration) {
+        await session?.close();
         _removeListeners();
         player.dispose();
         player = null;
         _videoController = null;
-        return;
+        return false;
       }
       _videoPlayerController = player;
       if (isAnim && superResolutionType.value != .disable) {
@@ -938,14 +956,18 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
     }
 
     assert(!isLive || seekTo == null);
-    await player.open(
-      Media(
-        video,
-        start: seekTo,
-        extras: extras.isEmpty ? null : extras,
-      ),
-      play: false,
-    );
+    _btrPlayback?.attach(player);
+    try {
+      await player.open(
+        Media(video, start: seekTo, extras: extras.isEmpty ? null : extras),
+        play: false,
+      );
+      return generation == _btrOpenGeneration && _playerCount > 0;
+    } catch (_) {
+      await session?.close();
+      if (identical(_btrPlayback, session)) _btrPlayback = null;
+      rethrow;
+    }
   }
 
   Future<void>? refreshPlayer() {
@@ -1109,6 +1131,11 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
           }
         })),
       stream.error.listen((String event) {
+        if (_btrPlayback?.transport case final transport?
+            when transport.tracks.values.any((track) => track.terminal)) {
+          SmartDialog.showToast('實驗傳輸已停止，請重新開啟影片或改用原始模式');
+          return;
+        }
         if (dataSource is FileSource &&
             event.startsWith("Failed to open file")) {
           return;
@@ -1180,11 +1207,12 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
   }
 
   Future<void> seek(Duration position, {bool isSeek = false}) async {
-    if (isSeek) {
+    if (isSeek && _btrPlayback?.transport == null) {
       /// 拖动进度条调节时，不等待第一帧，防止抖动
       await _videoPlayerController?.stream.buffer.first;
     }
     danmakuController?.clear();
+    _btrPlayback?.seek(position);
     try {
       await _videoPlayerController?.seek(position);
       _updateIOSPip(position);
@@ -1661,6 +1689,9 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
     }
 
     _playerCount = 0;
+    _btrOpenGeneration++;
+    _btrPlayback?.close();
+    _btrPlayback = null;
     if (removeSafeArea) {
       showSystemBar();
     }

@@ -28,7 +28,7 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.example.piliplus"
+        applicationId = "com.example.piliplus.btr.experiment"
         minSdk = flutter.minSdkVersion
         targetSdk = 37
         versionCode = flutter.versionCode
@@ -36,6 +36,10 @@ android {
     }
 
     packagingOptions.jniLibs.useLegacyPackaging = true
+
+    signingConfigs.getByName("debug") {
+        storeFile = rootProject.file("../.toolchain/btr-debug.keystore")
+    }
 
     val keyProperties = Properties().also {
         val properties = rootProject.file("key.properties")
@@ -70,7 +74,7 @@ android {
                 resValue(
                     type = "string",
                     name = "app_name",
-                    value = "PiliPlus dev",
+                    value = "PiliPlus BTR DEV",
                 )
             }
             proguardFiles(
