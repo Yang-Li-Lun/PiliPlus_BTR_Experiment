@@ -120,6 +120,9 @@ class BtrMetrics {
   final _networkRates = <String, _ByteRate>{};
   final _deliveryRates = <String, _ByteRate>{};
   int droppedEvents = 0;
+  final nativeErrorOrigins = <String, int>{};
+  Map<String, Object>? firstNativeError;
+  Map<String, Object>? lastNativeError;
 
   void registerTrack(String track) {
     transportMeasured = true;
@@ -206,11 +209,17 @@ class BtrMetrics {
   void nativeLog(String prefix, String level, String text) {
     if (level != 'error' && level != 'fatal') return;
     const known = {'ffmpeg', 'ad', 'vd', 'ao', 'cplayer', 'stream', 'file'};
-    event('native-error-origin', {
-      'origin': known.contains(prefix) ? prefix : 'other',
+    final origin = known.contains(prefix) ? prefix : 'other';
+    nativeErrorOrigins.update(origin, (n) => n + 1, ifAbsent: () => 1);
+    final detail = <String, Object>{
+      'atMs': now() - openedAt,
+      'origin': origin,
       'level': level,
       'readKind': BtrReadRecovery.classify(text) ?? 'unclassified',
-    });
+    };
+    firstNativeError ??= detail;
+    lastNativeError = detail;
+    event('native-error-origin', detail);
   }
 
   // Categorize native errors without storing URLs, signed queries, codec names,
@@ -272,6 +281,17 @@ class BtrMetrics {
     };
     return {
       'schema': 2,
+      'buildId': const String.fromEnvironment(
+        'BTR_BUILD_ID',
+        defaultValue: 'unidentified',
+      ),
+      'nativeErrorOrigins': Map<String, int>.of(nativeErrorOrigins),
+      'firstNativeError': firstNativeError == null
+          ? null
+          : Map<String, Object>.of(firstNativeError!),
+      'lastNativeError': lastNativeError == null
+          ? null
+          : Map<String, Object>.of(lastNativeError!),
       'mode': mode.name,
       'sessionEnded': ended,
       'elapsedMs': now() - openedAt,

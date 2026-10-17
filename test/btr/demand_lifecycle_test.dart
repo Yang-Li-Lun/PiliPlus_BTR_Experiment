@@ -173,6 +173,7 @@ void main() {
           newer ? 1 : 0,
         );
         expect(transport.currentSeekHasLocalFailure, newer);
+        expect(transport.currentReadFailureAt != null, newer);
       },
     );
   }
@@ -193,6 +194,17 @@ void main() {
     expect(metrics.cancellations, 0);
     expect(metrics.terminalFailures, 0);
     expect(transport.tracks['video']!.lastFailure, 'attempt-deadline');
+    final failures = metrics.events.where(
+      (e) => e['event'] == 'request-failed',
+    );
+    expect(failures, hasLength(3));
+    for (final failure in failures) {
+      expect(failure['phase'], 'headers');
+      expect(failure['generation'], 0);
+      expect(failure['receivedBytes'], 0);
+      expect(failure['queueMs'], isNonNegative);
+    }
+    expect(transport.currentReadFailureAt, isNotNull);
     cdn.handler = null;
     expect(
       await fetchLocal(urls['video']!, range: 'bytes=1000000-1065535'),

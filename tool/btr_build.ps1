@@ -1,7 +1,8 @@
 param(
     [Parameter(Mandatory)][string]$AndroidSdk,
     [Parameter(Mandatory)][string]$JavaHome,
-    [switch]$ShortIpcPath
+    [switch]$ShortIpcPath,
+    [ValidatePattern('^[A-Za-z0-9._-]+$')][string]$BuildId = 'unidentified'
 )
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path $PSScriptRoot -Parent
@@ -26,6 +27,6 @@ if (!(Test-Path -LiteralPath $key)) {
 }
 Push-Location $repo
 try {
-    & "$repo/.toolchain/flutter/bin/flutter.bat" build apk --release --target-platform android-arm64 --split-per-abi --android-project-arg dev=1 --android-project-arg android.builder.sdkDownload=false --no-pub
+    & "$repo/.toolchain/flutter/bin/flutter.bat" build apk --release --target-platform android-arm64 --split-per-abi --android-project-arg dev=1 --android-project-arg android.builder.sdkDownload=false "--dart-define=BTR_BUILD_ID=$BuildId" --no-pub
     exit $LASTEXITCODE
 } finally { Pop-Location }

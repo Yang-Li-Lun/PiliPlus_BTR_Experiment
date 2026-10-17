@@ -5,6 +5,25 @@ import 'package:test_api/scaffolding.dart';
 
 void main() {
   test(
+    'bounded error summaries survive event eviction without retaining text',
+    () {
+      final m = BtrMetrics(BtrMode.combined)
+        ..nativeLog('ao', 'error', 'secret audio device');
+      for (var i = 0; i < 300; i++) {
+        m.nativeLog('ffmpeg', 'error', 'HTTP error 503 secret URL');
+      }
+      final data = m.snapshot();
+      expect(m.events.length, 128);
+      expect(data['nativeErrorOrigins'], {'ao': 1, 'ffmpeg': 300});
+      expect((data['firstNativeError'] as Map)['origin'], 'ao');
+      expect((data['firstNativeError'] as Map)['readKind'], 'unclassified');
+      expect((data['lastNativeError'] as Map)['readKind'], 'http-status');
+      expect(data['buildId'], 'unidentified');
+      expect(data.toString(), isNot(contains('secret')));
+    },
+  );
+
+  test(
     'AV probes are bounded numeric observations and retain pre-EOF evidence',
     () {
       var now = 1000;

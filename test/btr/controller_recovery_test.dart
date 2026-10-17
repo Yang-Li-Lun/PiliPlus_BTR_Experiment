@@ -64,6 +64,8 @@ void main() {
     final handlers = [
       'bool _handleBtrNativeError(',
       'bool _acceptBtrCompleted(',
+      'void _checkBtrReadStall(',
+      'Future<void> _stopTerminalBtr(',
     ].where(source.contains).map((marker) => method(source, marker)).join('\n');
     final native = File(
       '${root.path}/.toolchain/pub-cache/git/media-kit-73771ec38176be2d984a3049c28177bce23b54a0/media_kit/lib/src/player/native/player/real.dart',
@@ -137,32 +139,36 @@ class Player {
     calls.add(args.join(':')); state.playing = args.last == 'no';
   }
   Future<void> stop() async { calls.add('stop'); await stopping?.future; state.position = Duration.zero; state.completed = false; }
+  Future<void> pause() async { calls.add('pause'); state.playing = false; }
   Future<void> open(Media media, {required bool play}) async { calls.add('open:\${media.start.inSeconds}'); await onOpen?.call(); state.position = media.start; state.playing = play; if (lateOpenEof) state.completed = true; }
 }
 class Transport implements BtrTransport {
   @override dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
   Transport(this.player); final Player player;
   bool currentSeekHasLocalFailure = false;
+  int? currentReadFailureAt;
   final tracks = <String, BtrTrack>{};
   void seek() { currentSeekHasLocalFailure = false; }
   Future<void> retirePlayerRequests() async { player.calls.add('retire'); }
+  Future<void> close() async { player.calls.add('transport-close'); }
 }
 typedef BtrPlayback = Session;
 class Session {
   Session(Player p): transport = Transport(p);
   BtrTransport transport;
-  final metrics = BtrMetrics(BtrMode.combined);
+  int now = 0;
+  late final metrics = BtrMetrics(BtrMode.combined, clock: () => now);
   final readRecovery = BtrReadRecovery();
   void seek(Duration p) { readRecovery.reset(); metrics.seek(p.inMilliseconds); transport.seek(); }
+  Future<void> close() => transport.close();
 }
 class Subject {
   Subject() { _btrPlayback = Session(_videoPlayerController!); }
   final onlyPlayAudio = Value(false);
   final _statusListeners = <void Function(Status)>[];
-  int completionCount = 0, terminalStops = 0;
+  int completionCount = 0;
   void _startWakeLockTimer() {}
   void makeHeartBeat(int value, {Beat? type}) { if (value == -1) completionCount++; }
-  void _stopTerminalBtr(Session s) { terminalStops++; }
   void wire() {
     final player = _videoPlayerController!;
     player.stream.error.listen($errorCallback);
@@ -374,6 +380,46 @@ Future<void> main() async {
     p.state.position = const Duration(seconds: 37); p.completedController.add(true);
     check(c.completionCount == 0, 'premature EOF accepted');
     check(c._retryTimer == null, 'EOF alone invented a read failure');
+  });
+  await scenario('zero native errors plus sustained current transport stall reopens once', () => fast(() async {
+    final c = Subject()..wire(); final p = c._videoPlayerController!;
+    final s = c._btrPlayback!; p.state.position = const Duration(seconds: 37);
+    p.state.buffering = true; c.isBuffering.value = true;
+    (s.transport as Transport).currentReadFailureAt = 0;
+    (c as dynamic)._checkBtrReadStall(s);
+    s.now = 14999; (c as dynamic)._checkBtrReadStall(s);
+    check(c._retryTimer == null, 'short stall reopened');
+    s.now = 15000; (c as dynamic)._checkBtrReadStall(s);
+    await Future<void>.delayed(const Duration(milliseconds: 40));
+    check(p.calls.contains('open:37'), 'no-error stall never entered recovery');
+    check(s.metrics.playerErrors == 0, 'fabricated native error');
+    (s.transport as Transport).currentReadFailureAt = 15000;
+    (c as dynamic)._checkBtrReadStall(s);
+    s.now = 30000; (c as dynamic)._checkBtrReadStall(s);
+    check(c._btrFailedGeneration == c._btrOpenGeneration && p.calls.contains('pause'), 'exhausted recovery buffers forever');
+    check(p.calls.where((v) => v.startsWith('open:')).length == 1, 'unbounded reopen');
+  }));
+  await scenario('abnormal EOF followed by proxy failure enters stall recovery without classifying unknown errors', () => fast(() async {
+    final c = Subject()..wire(); final p = c._videoPlayerController!;
+    final s = c._btrPlayback!; p.state.position = const Duration(seconds: 2);
+    p.completedController.add(true);
+    (c as dynamic)._checkBtrReadStall(s);
+    s.now = 2500; (s.transport as Transport).currentReadFailureAt = s.now;
+    s.now = 15000; (c as dynamic)._checkBtrReadStall(s);
+    await Future<void>.delayed(const Duration(milliseconds: 40));
+    check(p.calls.contains('open:2') && c.completionCount == 0, 'completed/local failure chain lost');
+  }));
+  await scenario('pause, stale source and unsupported stall evidence do not reopen', () async {
+    for (final mode in ['pause', 'source', 'no-evidence']) {
+      final c = Subject(); final p = c._videoPlayerController!; final s = c._btrPlayback!;
+      p.state.buffering = true;
+      if (mode != 'no-evidence') (s.transport as Transport).currentReadFailureAt = 0;
+      if (mode == 'pause') c._seekIntent.requestPlaying(false);
+      if (mode == 'source') c._btrSourceIsCurrent = () => false;
+      (c as dynamic)._checkBtrReadStall(s); s.now = 20000;
+      (c as dynamic)._checkBtrReadStall(s);
+      check(c._retryTimer == null, 'invalid stall recovered: \$mode');
+    }
   });
   await scenario('natural EOF and deliberate end seek still publish completed', () async {
     final c = Subject()..wire(); final p = c._videoPlayerController!;

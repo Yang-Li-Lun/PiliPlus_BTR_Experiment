@@ -3,6 +3,29 @@ import 'package:matcher/expect.dart';
 import 'package:test_api/scaffolding.dart';
 
 void main() {
+  test('stall requires recent transport evidence and no position progress', () {
+    final r = BtrReadRecovery();
+    bool poll(int now, int position, {int? failureAt, bool eligible = true}) =>
+        r.observeStall(
+          now: now,
+          position: Duration(milliseconds: position),
+          waiting: true,
+          eligible: eligible,
+          failureAt: failureAt,
+        );
+    expect(poll(0, 0), false);
+    expect(poll(20000, 0), false);
+    expect(poll(20000, 1, failureAt: 19000), false);
+    expect(poll(34999, 1, failureAt: 30000), false);
+    expect(poll(35000, 1, failureAt: 30000), true);
+    r.reset();
+    expect(poll(40000, 1, failureAt: 30000), false);
+    expect(poll(60000, 1, failureAt: 30000), false);
+    expect(poll(60000, 1, failureAt: 60000, eligible: false), false);
+    expect(poll(60001, 1, failureAt: 60000), false);
+    expect(poll(75001, 1, failureAt: 60000), true);
+  });
+
   test('unknown duration is not fabricated EOF evidence, read failure is', () {
     final r = BtrReadRecovery();
     expect(r.acceptCompleted(Duration.zero, Duration.zero, null), true);

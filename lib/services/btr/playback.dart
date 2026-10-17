@@ -106,7 +106,11 @@ class BtrPlayback {
     }
   }
 
-  void attach(Player player, {void Function()? onTerminalFailure}) {
+  void attach(
+    Player player, {
+    void Function()? onTerminalFailure,
+    void Function()? onReadStall,
+  }) {
     if (_closed) return;
     var terminalReported = false;
     void reportTerminal() {
@@ -174,6 +178,8 @@ class BtrPlayback {
     }
     _meter = Timer.periodic(const Duration(milliseconds: 500), (_) {
       reportTerminal();
+      if (_closed) return;
+      onReadStall?.call();
       metrics.nativePlayerVolume = player.state.volume;
       if (transport != null) metrics.sampleNativeAv(player.getProperty);
       metrics.bufferAheadSeconds = observedBuffer == null

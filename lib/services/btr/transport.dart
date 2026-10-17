@@ -36,6 +36,16 @@ class _Demand {
   String stage = 'discovery';
   final token = BtrCancel();
   String? cancellation;
+  bool mediaGet = false;
+  void Function()? rebalance;
+  int reservedBytes = 0;
+}
+
+class _QueuedPiece {
+  _QueuedPiece(this.range, this.token, this.result);
+  final BtrRange range;
+  final BtrCancel token;
+  final Future<_PieceResult> result;
 }
 
 // Only transport interruptions may be retried. Protocol/identity violations and
@@ -76,6 +86,7 @@ class BtrTrack {
   final _demands = <_Demand>{};
   int _nextDemand = 0;
   int _recoverableFailures = 0;
+  int _latestGetGeneration = 0;
   int _reservedBytes = 0;
   Completer<void>? _capacityChanged;
   BtrSample? sample;
@@ -86,6 +97,12 @@ class BtrTrack {
   String? lastFailure;
   int _hedges = 0;
   int peakReservedBytes = 0;
+  bool _hasNewerGet(_Demand demand) => _demands.any(
+    (other) =>
+        other.mediaGet &&
+        other.generation > demand.generation &&
+        !other.token.cancelled,
+  );
   final health = <String, Map<String, Object>>{};
 
   Future<void> initialize() => _initializing ??= _discover();
@@ -263,10 +280,18 @@ class BtrTrack {
         );
       }
       if (!isHead) {
+        demand.mediaGet = true;
+        if (demand.generation > _latestGetGeneration) {
+          _latestGetGeneration = demand.generation;
+          _recoverableFailures = 0;
+        }
+        for (final other in _demands) {
+          other.rebalance?.call();
+        }
         stage = 'upstream';
         demand.stage = stage;
         final stream = owner.mode.usesThreads && identity.canSegment
-            ? _ordered(range, token)
+            ? _ordered(range, demand)
             : _direct(range, token);
         await for (final bytes in stream) {
           token.check();
@@ -293,7 +318,9 @@ class BtrTrack {
       demand.stage = stage;
       await token.bind(response.close().timeout(const Duration(seconds: 5)));
       outcome = 'complete';
-      if (!isHead) _recoverableFailures = 0;
+      if (!isHead && demand.generation == _latestGetGeneration) {
+        _recoverableFailures = 0;
+      }
     } catch (error) {
       if (!token.cancelled && error is! BtrCancelled) {
         failure = _failureCode(error);
@@ -307,14 +334,20 @@ class BtrTrack {
             owner._localFailureGeneration ?? -1,
             demand.generation,
           );
+          owner._readFailure(demand.generation, 'proxy-response');
         } else {
           metrics.failures++;
           lastFailure = failure;
           final recoverable = _recoverable(error);
-          if (recoverable) _recoverableFailures++;
+          if (recoverable) {
+            owner._readFailure(demand.generation, 'demand-exhausted');
+          }
+          final currentGeneration = demand.generation == _latestGetGeneration;
+          if (recoverable && currentGeneration) _recoverableFailures++;
           // _piece already has a 3-attempt/25s bound. Allow a later native GET
           // to recover, but cap consecutive exhausted demands on this track.
-          final mustEnd = !recoverable || _recoverableFailures >= 3;
+          final mustEnd =
+              !recoverable || (currentGeneration && _recoverableFailures >= 3);
           if (mustEnd) {
             terminal = true;
             if (!_terminalRecorded) metrics.terminalFailures++;
@@ -417,7 +450,8 @@ class BtrTrack {
     }
   }
 
-  Stream<Uint8List> _ordered(BtrRange range, BtrCancel token) async* {
+  Stream<Uint8List> _ordered(BtrRange range, _Demand demand) async* {
+    final token = demand.token;
     const window = 4 * 1024 * 1024;
     const headBytes = 65536;
     // Never let speculative data for a stalled consumer occupy the head slots
@@ -430,11 +464,41 @@ class BtrTrack {
     var cursor = range.start;
     var head = cursor;
     var reserved = 0;
-    final queue = Queue<(BtrRange, Future<_PieceResult>)>();
+    final queue = Queue<_QueuedPiece>();
+    Future<void>? reclaiming;
+    // Only unconsumed speculation is revocable. The head being awaited or
+    // written is outside this queue and remains valid, even across a seek.
+    void rebalance() {
+      if (!_hasNewerGet(demand) || queue.isEmpty || reclaiming != null) return;
+      final removed = queue.toList();
+      queue.clear();
+      cursor = removed.first.range.start;
+      for (final entry in removed) {
+        entry.token.cancel();
+      }
+      metrics.event('prefetch-reclaimed', {
+        'track': spec.kind,
+        'request': demand.id,
+        'generation': demand.generation,
+        'pieces': removed.length,
+      });
+      reclaiming = () async {
+        await Future.wait(removed.map((entry) => entry.result));
+        final bytes = removed.fold<int>(0, (sum, e) => sum + e.range.length);
+        reserved -= bytes;
+        demand.reservedBytes = reserved;
+        _releaseBytes(bytes);
+        reclaiming = null;
+      }();
+    }
+
+    demand.rebalance = rebalance;
     void fill() {
+      if (reclaiming != null) return;
+      final older = _hasNewerGet(demand);
       // Keep distant speculative data bounded even if the head stalls.
       while (cursor <= range.end &&
-          queue.length < math.max(1, owner.scheduler.limit - 2)) {
+          queue.length < (older ? 1 : math.max(1, owner.scheduler.limit - 2))) {
         final needsHead = reserved == 0;
         final size = needsHead ? headBytes : adaptive.pieceSize;
         final end = math.min(cursor + size - 1, range.end);
@@ -443,6 +507,8 @@ class BtrTrack {
         final limit = needsHead ? window : speculativeLimit;
         if (_reservedBytes + piece.length > limit) break;
         final offset = cursor;
+        final pieceToken = BtrCancel();
+        final unlinkPiece = scope.listen(pieceToken.cancel);
         Future<_PieceResult> run() async {
           try {
             final s = sample!;
@@ -455,14 +521,20 @@ class BtrTrack {
             return _PieceResult(
               await _piece(
                 piece,
-                scope,
+                pieceToken,
+                demand: demand,
                 isHead: () => offset == head,
-                priority: () => (audio ? 120 : 80) + (offset == head ? 100 : 0),
+                priority: () =>
+                    (audio ? 120 : 80) +
+                    (offset == head ? 1000 : 0) +
+                    (_hasNewerGet(demand) ? 0 : 100),
               ),
               null,
             );
           } catch (e) {
             return _PieceResult(null, e);
+          } finally {
+            unlinkPiece();
           }
         }
 
@@ -476,8 +548,9 @@ class BtrTrack {
             jobs.remove(finished);
           }),
         );
-        queue.add((piece, task));
+        queue.add(_QueuedPiece(piece, pieceToken, task));
         reserved += piece.length;
+        demand.reservedBytes = reserved;
         _reservedBytes += piece.length;
         peakReservedBytes = math.max(peakReservedBytes, _reservedBytes);
         cursor = end + 1;
@@ -487,23 +560,29 @@ class BtrTrack {
     try {
       while (cursor <= range.end || queue.isNotEmpty) {
         scope.check();
+        if (reclaiming case final pending?) await scope.bind(pending);
         fill();
         if (queue.isEmpty) {
           await scope.bind((_capacityChanged ??= Completer<void>()).future);
           continue;
         }
         final entry = queue.removeFirst();
-        final result = await scope.bind(entry.$2);
+        final result = await scope.bind(entry.result);
         if (result.error case final error?) throw error;
         yield result.bytes!;
-        reserved -= entry.$1.length;
-        _releaseBytes(entry.$1.length);
-        head = entry.$1.end + 1;
+        reserved -= entry.range.length;
+        demand.reservedBytes = reserved;
+        _releaseBytes(entry.range.length);
+        head = entry.range.end + 1;
       }
     } finally {
       scope.cancel();
       await Future.wait(jobs.toList());
+      await reclaiming;
       _releaseBytes(reserved);
+      demand
+        ..reservedBytes = 0
+        ..rebalance = null;
       unlink();
     }
   }
@@ -511,6 +590,7 @@ class BtrTrack {
   Future<Uint8List> _piece(
     BtrRange range,
     BtrCancel token, {
+    required _Demand demand,
     required bool Function() isHead,
     required int Function() priority,
   }) async {
@@ -553,7 +633,7 @@ class BtrTrack {
         void launch(_Attempt attempt, BtrCancel cancel, bool copy) {
           tasks.add(() async {
             try {
-              await _attempt(range, attempt, cancel, priority);
+              await _attempt(range, attempt, cancel, priority, demand, isHead);
               if (!winner.isCompleted) winner.complete(attempt.data);
             } catch (e) {
               lastError = e;
@@ -655,11 +735,16 @@ class BtrTrack {
     _Attempt attempt,
     BtrCancel token,
     int Function() priority,
+    _Demand demand,
+    bool Function() isHead,
   ) async {
     final id = sample!.identity;
     final scope = BtrCancel();
     final unlink = token.listen(scope.cancel);
-    final timer = Timer(network.attemptTimeout, scope.cancel);
+    Timer? timer;
+    var phase = 'scheduler';
+    final queuedAt = metrics.now();
+    int? startedAt;
     final remaining = BtrRange(piece.start + attempt.received, piece.end);
     BtrHttpLease? lease;
     StreamIterator<List<int>>? reader;
@@ -674,6 +759,9 @@ class BtrTrack {
         priority: priority,
         etag: id.etag,
         onStarted: () {
+          startedAt = metrics.now();
+          phase = 'headers';
+          timer = Timer(network.attemptTimeout, scope.cancel);
           if (before > 0) {
             metrics.resumes++;
             metrics.resumedBytes += before;
@@ -693,6 +781,7 @@ class BtrTrack {
         actual: id.uri,
       );
       attempt.validated = true;
+      phase = 'body';
       reader = StreamIterator(lease.response);
       while (await scope.bind(
         reader.moveNext().timeout(network.stallTimeout),
@@ -725,12 +814,21 @@ class BtrTrack {
           ? const BtrFailure('attempt-deadline')
           : error;
       if (!token.cancelled) {
+        if (_recoverable(failure) && isHead()) {
+          owner._readFailure(demand.generation, 'head-attempt');
+        }
         metrics.failures++;
         metrics.requestFailures++;
         lastFailure = _failureCode(failure);
         metrics.event('request-failed', {
           'track': spec.kind,
+          'request': demand.id,
+          'generation': demand.generation,
           'stage': 'upstream-piece',
+          'phase': phase,
+          'queueMs': (startedAt ?? metrics.now()) - queuedAt,
+          'attemptMs': startedAt == null ? 0 : metrics.now() - startedAt!,
+          'receivedBytes': attempt.received - before,
           'start': remaining.start,
           'end': remaining.end,
           'reason': lastFailure!,
@@ -744,7 +842,7 @@ class BtrTrack {
       }
       throw failure;
     } finally {
-      timer.cancel();
+      timer?.cancel();
       unlink();
       await reader?.cancel();
       await lease?.close(reusable: complete);
@@ -798,6 +896,24 @@ class BtrTransport {
   int _retirementRejections = 0;
   int _localResponseFailures = 0;
   int? _localFailureGeneration;
+  int _headFailures = 0;
+  int? _readFailureAt;
+  String? _readFailureKind;
+  int? get currentReadFailureAt => _readFailureAt;
+  void _readFailure(int generation, String kind) {
+    if (generation != _seekGeneration) return;
+    if (kind == 'head-attempt' && ++_headFailures < 2) return;
+    _readFailureAt = metrics.now();
+    _readFailureKind = kind;
+  }
+
+  void _resetReadFailure() {
+    _readFailureAt = null;
+    _readFailureKind = null;
+    _headFailures = 0;
+    _localFailureGeneration = null;
+  }
+
   bool get currentSeekHasLocalFailure =>
       _localFailureGeneration == _seekGeneration;
   bool _retiring = false;
@@ -879,6 +995,7 @@ class BtrTransport {
       } else if (valid) {
         _capacityRejections++;
         _localFailureGeneration = _seekGeneration;
+        _readFailure(_seekGeneration, 'handler-capacity');
       } else {
         _invalidRejections++;
       }
@@ -927,6 +1044,7 @@ class BtrTransport {
         }
       }
       await settled;
+      _resetReadFailure();
     } finally {
       _retiring = false;
     }
@@ -936,6 +1054,7 @@ class BtrTransport {
     // mpv may satisfy a seek from its demux cache without opening another GET.
     // Notification alone must never truncate the currently consumed streams.
     _seekGeneration++;
+    _resetReadFailure();
   }
 
   Map<String, Object?> snapshot() => {
@@ -947,6 +1066,11 @@ class BtrTransport {
     'proxyRetirementRejections': _retirementRejections,
     'proxyLocalResponseFailures': _localResponseFailures,
     'localReadFailureGeneration': _localFailureGeneration,
+    'currentReadFailureKind': _readFailureKind,
+    'currentReadFailureAgeMs': _readFailureAt == null
+        ? null
+        : metrics.now() - _readFailureAt!,
+    'currentHeadFailures': _headFailures,
     'activeConnections': scheduler.active,
     'videoConnections': tracks.containsKey('video')
         ? scheduler.videoActive
@@ -987,6 +1111,8 @@ class BtrTransport {
                   'ageMs': metrics.now() - d.startedAt,
                   'progressAgeMs': metrics.now() - d.progressAt,
                   'deliveredBytes': d.deliveredBytes,
+                  'orderedReservationBytes': d.reservedBytes,
+                  'prefetchDeprioritized': t._hasNewerGet(d),
                 },
             ],
             'orderedReservationBytes': t._reservedBytes,

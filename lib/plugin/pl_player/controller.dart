@@ -1013,6 +1013,7 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
       session.attach(
         player,
         onTerminalFailure: () => _stopTerminalBtr(session),
+        onReadStall: () => _checkBtrReadStall(session),
       );
     }
     try {
@@ -1032,13 +1033,17 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
     }
   }
 
-  Future<void> _stopTerminalBtr(BtrPlayback session) async {
+  Future<void> _stopTerminalBtr(
+    BtrPlayback session, {
+    bool stalled = false,
+  }) async {
     final generation = _btrOpenGeneration;
     if (_taskScope.closed ||
         !identical(_btrPlayback, session) ||
         _btrFailedGeneration == generation ||
-        session.transport?.tracks.values.any((track) => track.terminal) !=
-            true) {
+        (!stalled &&
+            session.transport?.tracks.values.any((track) => track.terminal) !=
+                true)) {
       return;
     }
     final player = _videoPlayerController;
@@ -1049,7 +1054,9 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
       isBuffering.value = false;
       playerStatus = .paused;
       _updatePlaybackState();
-      SmartDialog.showToast('實驗傳輸已停止，請重新開啟影片或改用原始模式');
+      SmartDialog.showToast(
+        stalled ? '播放恢復後仍無進展，請重新開啟影片或改用原始模式' : '實驗傳輸已停止，請重新開啟影片或改用原始模式',
+      );
     }
     try {
       // Capture the player before the await; a stale failure must not pause a
@@ -1220,6 +1227,41 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
         refreshPlayer(automatic: true, recoverSeek: recoverSeek);
       }
     });
+  }
+
+  void _checkBtrReadStall(BtrPlayback session) {
+    final player = _videoPlayerController;
+    if (player == null ||
+        session.transport == null ||
+        _taskScope.closed ||
+        !identical(session, _btrPlayback) ||
+        !(_btrSourceIsCurrent?.call() ?? true) ||
+        _btrFailedGeneration == _btrOpenGeneration) {
+      return;
+    }
+    if (!session.readRecovery.observeStall(
+      now: session.metrics.now(),
+      position: player.state.position,
+      waiting: player.state.buffering || session.readRecovery.abnormalCompleted,
+      eligible: _seekIntent.playRequested && !_processing && !_reopening,
+      failureAt: session.transport!.currentReadFailureAt,
+    )) {
+      return;
+    }
+    if (_btrAutomaticReopens >= 1) {
+      session.metrics.event('player-recovery-exhausted', {
+        'reason': 'read-stall',
+      });
+      _stopTerminalBtr(session, stalled: true);
+      return;
+    }
+    if (_retryTimer?.isActive != true) {
+      session.metrics.event('player-read-stall', {
+        'seekRevision': _seekIntent.seekRevision,
+        'positionMs': player.state.position.inMilliseconds,
+      });
+    }
+    _scheduleBtrReadRecovery(session);
   }
 
   bool _handleBtrNativeError(String event) {

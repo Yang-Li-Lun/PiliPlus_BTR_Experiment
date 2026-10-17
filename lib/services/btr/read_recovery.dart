@@ -6,6 +6,38 @@ class BtrReadRecovery {
   Duration? resumePosition;
   Duration? _previousPosition;
   int revision = 0;
+  int? _stallSince;
+  Duration? _stallPosition;
+
+  /// A stationary clock alone is not a transport failure. Require prolonged
+  /// waiting AND recent, same-generation proxy/head failure evidence.
+  bool observeStall({
+    required int now,
+    required Duration position,
+    required bool waiting,
+    required bool eligible,
+    required int? failureAt,
+  }) {
+    if (!eligible || !waiting) {
+      _stallSince = null;
+      _stallPosition = null;
+      return false;
+    }
+    if (_stallPosition == null || position != _stallPosition) {
+      _stallSince = now;
+      _stallPosition = position;
+    }
+    if (_stallSince == null ||
+        now - _stallSince! < 15000 ||
+        failureAt == null ||
+        failureAt < _stallSince! - 1000 ||
+        now - failureAt > 30000) {
+      return false;
+    }
+    failed = true;
+    resumePosition ??= position;
+    return true;
+  }
 
   static String? classify(String message) {
     final text = message.trim();
@@ -36,6 +68,8 @@ class BtrReadRecovery {
   void reset() {
     failed = abnormalCompleted = false;
     resumePosition = _previousPosition = null;
+    _stallSince = null;
+    _stallPosition = null;
     revision++;
   }
 
