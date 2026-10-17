@@ -5,6 +5,48 @@ import 'package:test_api/scaffolding.dart';
 
 void main() {
   test(
+    'AV probes are bounded numeric observations and retain pre-EOF evidence',
+    () {
+      var now = 1000;
+      final m = BtrMetrics(BtrMode.combined, clock: () => now);
+      expect(m.snapshot()['nativeAvProbe'], isNull);
+      m
+        ..sampleNativeAv(
+          (key) => switch (key) {
+            'audio-pts' => '12.5',
+            'mute' => 'no',
+            'audio-out-params/samplerate' => '48000',
+            _ => '',
+          },
+        )
+        ..nativeCompleted(true);
+      now += 500;
+      m.sampleNativeAv((key) => key == 'audio-pts' ? 'NaN' : 'secret-device');
+      expect(m.nativeAvProbe!['audio-pts'], isNull);
+      expect(m.previousNativeAvProbe!['audio-pts'], 12.5);
+      expect(m.nativeAvBeforeCompleted!['mute'], false);
+      for (var i = 0; i < 200; i++) {
+        m.sampleNativeAv((_) => throw StateError('secret'));
+      }
+      expect(m.nativeAvProbe!.length, 10);
+      expect(m.snapshot().toString(), isNot(contains('secret')));
+      m
+        ..nativeLog('secret-device', 'error', 'private URL')
+        ..nativeLog('ffmpeg', 'error', 'HTTP error 503 Service Unavailable')
+        ..nativeLog('ad', 'error', 'secret codec')
+        ..nativeLog('ffmpeg', 'warn', 'HTTP error 503 Service Unavailable');
+      final events = m.events
+          .where((e) => e['event'] == 'native-error-origin')
+          .toList();
+      expect(events.length, 3);
+      expect(events[0]['origin'], 'other');
+      expect(events[1]['readKind'], 'http-status');
+      expect(events[2]['origin'], 'ad');
+      expect(m.snapshot().toString(), isNot(contains('secret')));
+    },
+  );
+
+  test(
     'EOF reset retains earlier observed audio and distinct open/seek failures',
     () {
       final metrics = BtrMetrics(BtrMode.combined)

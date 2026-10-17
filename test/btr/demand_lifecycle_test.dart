@@ -22,7 +22,8 @@ Future<void> waitUntil(bool Function() ready) async {
 // Inject a downstream flush timeout after real headers/body have been sent.
 // This exercises serve's local sink boundary, independently of upstream I/O.
 class FlushFailureResponse implements HttpResponse {
-  FlushFailureResponse(this.inner);
+  FlushFailureResponse(this.inner, {this.beforeFailure});
+  final Future<void> Function()? beforeFailure;
   final HttpResponse inner;
   @override
   HttpHeaders get headers => inner.headers;
@@ -44,6 +45,7 @@ class FlushFailureResponse implements HttpResponse {
   @override
   Future<void> flush() async {
     await inner.flush();
+    await beforeFailure?.call();
     throw TimeoutException('https://secret.invalid/?token=never-log');
   }
 
@@ -52,8 +54,11 @@ class FlushFailureResponse implements HttpResponse {
 }
 
 class FlushFailureRequest implements HttpRequest {
-  FlushFailureRequest(this.inner)
-    : response = FlushFailureResponse(inner.response);
+  FlushFailureRequest(this.inner, {Future<void> Function()? beforeFailure})
+    : response = FlushFailureResponse(
+        inner.response,
+        beforeFailure: beforeFailure,
+      );
   final HttpRequest inner;
   @override
   final HttpResponse response;
@@ -118,6 +123,58 @@ void main() {
         ),
     ]);
     await Future.wait(transport.tracks.values.map((t) => t.initialize()));
+  }
+
+  for (final newer in [false, true]) {
+    test(
+      'late old response failure keeps its generation; newer failure=$newer',
+      () async {
+        final entered = Completer<void>(), release = Completer<void>();
+        final oldDone = Completer<void>(), newDone = Completer<void>();
+        final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+        addTearDown(() async {
+          if (!release.isCompleted) release.complete();
+          await server.close(force: true);
+        });
+        server.listen((r) async {
+          final old = r.uri.path == '/old';
+          await transport.tracks['video']!.serve(
+            FlushFailureRequest(
+              r,
+              beforeFailure: old
+                  ? () async {
+                      entered.complete();
+                      await release.future;
+                    }
+                  : null,
+            ),
+          );
+          (old ? oldDone : newDone).complete();
+        });
+        final old = expectLater(
+          fetchLocal('http://127.0.0.1:${server.port}/old'),
+          throwsA(anything),
+        );
+        await entered.future;
+        transport.seek();
+        if (newer) {
+          await expectLater(
+            fetchLocal('http://127.0.0.1:${server.port}/new'),
+            throwsA(anything),
+          );
+          await newDone.future;
+          expect(transport.currentSeekHasLocalFailure, true);
+        }
+        release.complete();
+        await old;
+        await oldDone.future;
+        expect(
+          transport.snapshot()['localReadFailureGeneration'],
+          newer ? 1 : 0,
+        );
+        expect(transport.currentSeekHasLocalFailure, newer);
+      },
+    );
   }
 
   test('attempt timeout is bounded upstream failure, not a cancellation or permanent track failure', () async {

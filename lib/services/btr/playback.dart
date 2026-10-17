@@ -7,6 +7,7 @@ import 'package:PiliPlus/http/constants.dart';
 import 'package:PiliPlus/plugin/pl_player/models/data_source.dart';
 import 'package:PiliPlus/services/btr/metrics.dart';
 import 'package:PiliPlus/services/btr/policy.dart';
+import 'package:PiliPlus/services/btr/read_recovery.dart';
 import 'package:PiliPlus/services/btr/settings.dart';
 import 'package:PiliPlus/services/btr/transport.dart';
 import 'package:PiliPlus/services/playback_task_scope.dart';
@@ -35,6 +36,7 @@ class BtrPlayback {
   final BtrSettings settings;
   BtrMode get mode => settings.mode;
   final BtrMetrics metrics;
+  final readRecovery = BtrReadRecovery();
   BtrTransport? transport;
   Timer? _meter;
   final _subscriptions = <StreamSubscription>[];
@@ -163,9 +165,17 @@ class BtrPlayback {
         reportTerminal();
       }),
     );
+    if (transport != null) {
+      _subscriptions.add(
+        player.stream.log.listen((log) {
+          metrics.nativeLog(log.prefix, log.level, log.text);
+        }),
+      );
+    }
     _meter = Timer.periodic(const Duration(milliseconds: 500), (_) {
       reportTerminal();
       metrics.nativePlayerVolume = player.state.volume;
+      if (transport != null) metrics.sampleNativeAv(player.getProperty);
       metrics.bufferAheadSeconds = observedBuffer == null
           ? null
           : ((observedBuffer! - player.state.position).inMilliseconds / 1000)
@@ -191,6 +201,7 @@ class BtrPlayback {
   }
 
   void seek(Duration position) {
+    readRecovery.reset();
     metrics.seek(position.inMilliseconds);
     transport?.seek();
   }

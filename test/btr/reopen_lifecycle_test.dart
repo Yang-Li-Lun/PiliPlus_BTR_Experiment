@@ -13,6 +13,79 @@ import 'fake_cdn.dart';
 import 'demand_lifecycle_test.dart' show waitUntil;
 
 void main() {
+  for (final oldCount in [1, 3]) {
+    test(
+      '$oldCount blocked old writers cannot starve a new range before handler capacity',
+      () async {
+        final bytes = Uint8List.fromList(
+          List.generate(16 * 1024 * 1024, (i) => i % 251),
+        );
+        final cdn = FakeCdn(bytes);
+        await cdn.start();
+        final metrics = BtrMetrics(BtrMode.combined),
+            scheduler = BtrScheduler();
+        final transport = BtrTransport(
+          mode: BtrMode.combined,
+          metrics: metrics,
+          scheduler: scheduler,
+          network: FakeNetwork(scheduler, metrics, cdn),
+        );
+        final sockets = <Socket>[];
+        addTearDown(() async {
+          for (final socket in sockets) {
+            socket.destroy();
+          }
+          await transport.close();
+          await cdn.close();
+        });
+        final urls = await transport.start([
+          BtrTrackSpec(
+            kind: 'video',
+            urls: ['https://origin.bilivideo.com/video.m4s'],
+          ),
+        ]);
+        final uri = Uri.parse(urls['video']!);
+        for (var i = 0; i < oldCount; i++) {
+          final socket = await Socket.connect(uri.host, uri.port);
+          sockets.add(socket);
+          socket.write(
+            'GET ${uri.path} HTTP/1.1\r\nHost: ${uri.host}:${uri.port}\r\nRange: bytes=0-\r\n\r\n',
+          );
+          await socket.flush();
+        }
+        await waitUntil(
+          () => (transport.snapshot()['tracks'] as List).any(
+            (t) =>
+                (t['demands'] as List).length == oldCount &&
+                (t['demands'] as List).every(
+                  (d) =>
+                      d['stage'] == 'proxy-write' && d['progressAgeMs'] >= 100,
+                ),
+          ),
+        );
+        transport.seek();
+        final received = await fetchLocal(
+          urls['video']!,
+          range: 'bytes=8388608-9437183',
+        ).timeout(const Duration(seconds: 3));
+        expect(received, orderedEquals(bytes.sublist(8388608, 9437184)));
+        expect(transport.snapshot()['proxyCapacityRejections'], 0);
+        expect(metrics.cancellations, 0);
+        expect(
+          transport.snapshot()['activeProxyHandlers'],
+          lessThanOrEqualTo(oldCount + 1),
+        );
+        expect(
+          transport.tracks['video']!.peakReservedBytes,
+          lessThanOrEqualTo(4 * 1024 * 1024),
+        );
+        expect(
+          (transport.snapshot()['tracks'] as List).single['activeDemands'],
+          greaterThanOrEqualTo(oldCount),
+        );
+      },
+    );
+  }
   test('real loopback backpressure is cancellable at native stop without waiting 15s flush timeout', () async {
     final bytes = Uint8List(16 * 1024 * 1024);
     final cdn = FakeCdn(bytes);

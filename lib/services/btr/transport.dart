@@ -303,7 +303,10 @@ class BtrTrack {
           // that the source or either media representation is permanently bad.
           outcome = 'local-error';
           owner._localResponseFailures++;
-          owner._localFailureGeneration = owner._seekGeneration;
+          owner._localFailureGeneration = math.max(
+            owner._localFailureGeneration ?? -1,
+            demand.generation,
+          );
         } else {
           metrics.failures++;
           lastFailure = failure;
@@ -416,6 +419,11 @@ class BtrTrack {
 
   Stream<Uint8List> _ordered(BtrRange range, BtrCancel token) async* {
     const window = 4 * 1024 * 1024;
+    const headBytes = 65536;
+    // Never let speculative data for a stalled consumer occupy the head slots
+    // of the other admissible handlers. Their GETs remain valid and independent.
+    const speculativeLimit =
+        window - (BtrTransport.handlerLimit - 1) * headBytes;
     final scope = BtrCancel();
     final unlink = token.listen(scope.cancel);
     final jobs = <Future<void>>{};
@@ -427,11 +435,13 @@ class BtrTrack {
       // Keep distant speculative data bounded even if the head stalls.
       while (cursor <= range.end &&
           queue.length < math.max(1, owner.scheduler.limit - 2)) {
-        final size = cursor == range.start ? 65536 : adaptive.pieceSize;
+        final needsHead = reserved == 0;
+        final size = needsHead ? headBytes : adaptive.pieceSize;
         final end = math.min(cursor + size - 1, range.end);
         final piece = BtrRange(cursor, end);
         // Share the original per-track memory cap across overlapping demands.
-        if (_reservedBytes + piece.length > window) break;
+        final limit = needsHead ? window : speculativeLimit;
+        if (_reservedBytes + piece.length > limit) break;
         final offset = cursor;
         Future<_PieceResult> run() async {
           try {
@@ -753,6 +763,7 @@ class BtrTrack {
 }
 
 class BtrTransport {
+  static const handlerLimit = 4;
   BtrTransport({
     required this.mode,
     required this.metrics,
@@ -862,7 +873,7 @@ class BtrTransport {
         parts[0] == _capability &&
         tracks.containsKey(parts[1]) &&
         (r.method == 'GET' || r.method == 'HEAD');
-    if (!valid || _retiring || _activeHandlers >= 4) {
+    if (!valid || _retiring || _activeHandlers >= handlerLimit) {
       if (valid && _retiring) {
         _retirementRejections++;
       } else if (valid) {
@@ -930,7 +941,7 @@ class BtrTransport {
   Map<String, Object?> snapshot() => {
     'activeProxyHandlers': _activeHandlers,
     'peakProxyHandlers': _peakHandlers,
-    'proxyHandlerLimit': 4,
+    'proxyHandlerLimit': handlerLimit,
     'proxyCapacityRejections': _capacityRejections,
     'proxyInvalidRejections': _invalidRejections,
     'proxyRetirementRejections': _retirementRejections,

@@ -31,6 +31,7 @@ import 'package:PiliPlus/plugin/pl_player/utils/danmaku_options.dart';
 import 'package:PiliPlus/plugin/pl_player/utils/fullscreen.dart';
 import 'package:PiliPlus/services/service_locator.dart';
 import 'package:PiliPlus/services/btr/playback.dart';
+import 'package:PiliPlus/services/btr/read_recovery.dart';
 import 'package:PiliPlus/services/playback_seek_intent.dart';
 import 'package:PiliPlus/services/playback_source_sequence.dart';
 import 'package:PiliPlus/services/playback_task_scope.dart';
@@ -1087,7 +1088,8 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
     if (automatic && session?.transport != null) {
       if ((_seekIntent.pendingTarget != null &&
               !(recoverSeek &&
-                  session!.transport!.currentSeekHasLocalFailure)) ||
+                  (session!.readRecovery.failed ||
+                      session.transport!.currentSeekHasLocalFailure))) ||
           _btrAutomaticReopens >= 1) {
         session!.metrics.event('player-reopen-skipped', {
           'reason': _btrAutomaticReopens >= 1 ? 'retry-budget' : 'seek-pending',
@@ -1100,7 +1102,10 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
       _retryTimer = null;
       _reopening = true;
       var media = ctr.current.last;
-      final target = _seekIntent.pendingTarget ?? ctr.state.position;
+      final target =
+          _seekIntent.pendingTarget ??
+          session?.readRecovery.resumePosition ??
+          ctr.state.position;
       final seekRevision = _seekIntent.seekRevision;
       if (!isLive) media = media.copyWith(start: target);
       return _sourceSequence
@@ -1119,6 +1124,7 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
             }
             if (automatic &&
                 recoverSeek &&
+                session?.readRecovery.failed != true &&
                 session?.transport?.currentSeekHasLocalFailure != true) {
               session?.metrics.event('player-reopen-skipped', {
                 'reason': 'local-failure-stale',
@@ -1128,7 +1134,7 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
             if (automatic && session?.transport != null) _btrAutomaticReopens++;
             session?.metrics.playerOpening(
               automatic
-                  ? (recoverSeek ? 'seek-local-read-error' : 'read-error')
+                  ? (recoverSeek ? 'seek-read-error' : 'read-error')
                   : 'user',
               target.inMilliseconds,
             );
@@ -1142,9 +1148,22 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
                   _btrFailedGeneration == _btrOpenGeneration) {
                 return;
               }
+              // A BTR seek during stop owns the new load's start position too.
+              if (!isLive && session?.transport != null) {
+                media = media.copyWith(
+                  start: _seekIntent.pendingTarget ?? target,
+                );
+              }
+              session?.readRecovery.reset();
               await ctr.open(media, play: false);
               if (!isCurrent() || _taskScope.closed) return;
-              if (_seekIntent.playRequested) await ctr.play();
+              if (_seekIntent.playRequested) {
+                if (session?.transport != null) {
+                  await _resumeAfterSeek(ctr);
+                } else {
+                  await ctr.play();
+                }
+              }
               session?.metrics.event('player-open-ended', {
                 'outcome': 'command-complete',
               });
@@ -1164,7 +1183,9 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
     if (_taskScope.closed || !identical(session, _btrPlayback)) return;
     final pendingSeek = _seekIntent.pendingTarget != null;
     final recoverSeek =
-        pendingSeek && session.transport?.currentSeekHasLocalFailure == true;
+        pendingSeek &&
+        (session.readRecovery.failed ||
+            session.transport?.currentSeekHasLocalFailure == true);
     if (_processing ||
         _reopening ||
         _btrAutomaticReopens >= 1 ||
@@ -1178,21 +1199,73 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
       });
       return;
     }
+    // Keep the first deadline: repeated native errors must not starve recovery.
+    if (_retryTimer?.isActive == true) return;
     final generation = _btrOpenGeneration;
     final seekRevision = _seekIntent.seekRevision;
-    _retryTimer?.cancel();
+    final readRevision = session.readRecovery.revision;
     _retryTimer = Timer(const Duration(seconds: 3), () {
+      _retryTimer = null;
       if (!_taskScope.closed &&
           generation == _btrOpenGeneration &&
           identical(session, _btrPlayback) &&
           seekRevision == _seekIntent.seekRevision &&
+          readRevision == session.readRecovery.revision &&
           (recoverSeek
               ? _seekIntent.pendingTarget != null &&
-                    session.transport?.currentSeekHasLocalFailure == true
-              : isBuffering.value && buffered.value == 0)) {
+                    (session.readRecovery.failed ||
+                        session.transport?.currentSeekHasLocalFailure == true)
+              : session.readRecovery.abnormalCompleted ||
+                    (isBuffering.value && session.readRecovery.failed))) {
         refreshPlayer(automatic: true, recoverSeek: recoverSeek);
       }
     });
+  }
+
+  bool _handleBtrNativeError(String event) {
+    final session = _btrPlayback;
+    if (session?.transport == null) return false;
+    if (_taskScope.closed || !(_btrSourceIsCurrent?.call() ?? true)) {
+      return true;
+    }
+    if (session!.transport!.tracks.values.any((track) => track.terminal)) {
+      _stopTerminalBtr(session);
+      return true;
+    }
+    if (!session.readRecovery.record(
+      event,
+      _videoPlayerController!.state.position,
+    )) {
+      return false;
+    }
+    session.metrics.event('native-read-failure', {
+      'kind': BtrReadRecovery.classify(event)!,
+      'localFailureObserved': session.transport!.currentSeekHasLocalFailure,
+      'seekRevision': _seekIntent.seekRevision,
+    });
+    _scheduleBtrReadRecovery(session);
+    return true;
+  }
+
+  bool _acceptBtrCompleted(Player player) {
+    final session = _btrPlayback;
+    if (session?.transport == null) return true;
+    if (session!.readRecovery.acceptCompleted(
+      player.state.position,
+      player.state.duration,
+      _seekIntent.pendingTarget,
+    )) {
+      return true;
+    }
+    session.metrics.event('player-completed-suppressed', {
+      'reason': session.readRecovery.failed
+          ? 'read-failure'
+          : 'unconfirmed-eof',
+      'positionMs': player.state.position.inMilliseconds,
+      'durationMs': player.state.duration.inMilliseconds,
+    });
+    if (session.readRecovery.failed) _scheduleBtrReadRecovery(session);
+    return false;
   }
 
   // 开始播放
@@ -1302,7 +1375,9 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
       stream.completed.listen((bool completed) {
         // A late EOF notification during seek is not completion of the target.
         // Leave it observable in BTR diagnostics, without auto-next/replay UI.
-        if (completed && !_seekIntent.acceptCompleted(player.state.duration)) {
+        if (completed &&
+            (!_acceptBtrCompleted(player) ||
+                !_seekIntent.acceptCompleted(player.state.duration))) {
           return;
         }
         if (completed) {
@@ -1321,6 +1396,13 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
       stream.position.listen((Duration position) {
         final wasSeeking = _seekIntent.pendingTarget != null;
         _seekIntent.position(position);
+        _btrPlayback?.readRecovery.position(
+          position,
+          advancing:
+              _seekIntent.pendingTarget == null &&
+              player.state.playing &&
+              !player.state.buffering,
+        );
         if (wasSeeking &&
             _seekIntent.pendingTarget == null &&
             position < player.state.duration &&
@@ -1373,18 +1455,7 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
           }
         })),
       stream.error.listen((String event) {
-        if (_btrPlayback?.transport case final transport?
-            when transport.tracks.values.any((track) => track.terminal)) {
-          _stopTerminalBtr(_btrPlayback!);
-          return;
-        }
-        final session = _btrPlayback;
-        if (session?.transport != null &&
-            (event.contains('http://127.0.0.1:') ||
-                event.startsWith('tcp: ffurl_read returned '))) {
-          _scheduleBtrReadRecovery(session!);
-          return;
-        }
+        if (_handleBtrNativeError(event)) return;
         if (dataSource is FileSource &&
             event.startsWith("Failed to open file")) {
           return;
@@ -1638,6 +1709,10 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
         !identical(player, _videoPlayerController)) {
       return;
     }
+    if (_btrPlayback?.readRecovery.abnormalCompleted == true) {
+      await refreshPlayer();
+      return;
+    }
     if (player != null && _seekIntent.pendingTarget != null) {
       await _resumeAfterSeek(player);
     } else {
@@ -1794,6 +1869,7 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
   }
 
   bool get isCompleted =>
+      _btrPlayback?.readRecovery.abnormalCompleted != true &&
       _seekIntent.pendingTarget == null &&
       (videoPlayerController!.state.completed ||
           durationInMilliseconds - positionInMilliseconds <= 50);

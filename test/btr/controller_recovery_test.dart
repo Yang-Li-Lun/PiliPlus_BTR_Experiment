@@ -21,6 +21,17 @@ String method(String source, String marker) {
   return source.substring(start, end);
 }
 
+String block(String source, int start) {
+  final open = source.indexOf('{', start);
+  var depth = 1, end = open + 1;
+  while (depth > 0) {
+    final c = source[end++];
+    if (c == '{') depth++;
+    if (c == '}') depth--;
+  }
+  return source.substring(start, end);
+}
+
 void main() {
   test('actual controller: late EOF, queued seek, reopen and failure contracts', () async {
     // package:test may supply a data URI as Platform.script; use the test path.
@@ -39,33 +50,77 @@ void main() {
     final recovery = source.contains('void _scheduleBtrReadRecovery(')
         ? method(source, 'void _scheduleBtrReadRecovery(')
         : '';
+    final errorCallback = block(
+      source,
+      source.indexOf('(String event)', source.indexOf('stream.error.listen')),
+    );
+    final completedCallback = block(
+      source,
+      source.indexOf(
+        '(bool completed)',
+        source.indexOf('stream.completed.listen'),
+      ),
+    );
+    final handlers = [
+      'bool _handleBtrNativeError(',
+      'bool _acceptBtrCompleted(',
+    ].where(source.contains).map((marker) => method(source, marker)).join('\n');
+    final native = File(
+      '${root.path}/.toolchain/pub-cache/git/media-kit-73771ec38176be2d984a3049c28177bce23b54a0/media_kit/lib/src/player/native/player/real.dart',
+    ).readAsStringSync();
+    final nativeDispatch = block(
+      native,
+      native.indexOf(
+        'if (!logController.isClosed)',
+        native.indexOf('case generated.mpv_event_id.MPV_EVENT_LOG_MESSAGE:'),
+      ),
+    );
     final fixture =
         File(
           '${root.path}/tool/btr_tests/.dart_tool/controller_recovery_fixture.dart',
         )..writeAsStringSync('''
 import 'dart:async';
+import 'dart:io';
+import 'dart:typed_data';
+import 'package:PiliPlus/services/btr/transport.dart';
+import 'package:PiliPlus/services/btr/scheduler.dart';
+import '${File('${root.path}/test/btr/fake_cdn.dart').uri}';
+import '${File('${root.path}/test/btr/demand_lifecycle_test.dart').uri}' show waitUntil;
 import 'package:PiliPlus/services/playback_seek_intent.dart';
 import 'package:PiliPlus/services/playback_source_sequence.dart';
 import 'package:PiliPlus/services/btr/metrics.dart';
 import 'package:PiliPlus/services/btr/policy.dart';
+import 'package:PiliPlus/services/btr/read_recovery.dart';
 const kDebugMode = false;
 void debugPrint(String message) {}
+class PlayerLog { PlayerLog({required String prefix, required String level, required String text}); }
+class SmartDialog { static void showToast(String text, {Duration? displayTime}) {} }
+class Utils { static void reportError(String text) {} }
+class EasyThrottle { static void throttle(String key, Duration d, void Function() f) => f(); }
+enum Beat { completed }
 enum DataStatus {error}
 enum Status {completed, paused, playing; bool get isCompleted => this == completed;}
 class Value<T> { Value(this.value); T value; }
 class FileSource {}
 class Scope { bool closed = false; }
 class Media { Media(this.start); final Duration start; Media copyWith({required Duration start}) => Media(start); }
-class State { bool completed = true, playing = false; Duration position = Duration.zero, buffer = Duration.zero, duration = const Duration(seconds: 120); }
+class State { bool completed = true, playing = false, buffering = false; final playlist = <Object>[]; Duration position = Duration.zero, buffer = Duration.zero, duration = const Duration(seconds: 120); }
 class NativeLock { Future<T> synchronized<T>(Future<T> Function() work) => work(); }
 class Player {
   final lock = NativeLock();
   final state = State();
   final current = [Media(Duration.zero)];
   final calls = <String>[];
-  final stream = (buffer: const Stream<Duration>.empty(),);
-  bool isPlayingStateChangeAllowed = false, lateEof = true, failSeek = false;
+  final errorController = StreamController<String>.broadcast(sync: true);
+  final logController = StreamController<PlayerLog>.broadcast(sync: true);
+  final completedController = StreamController<bool>.broadcast(sync: true);
+  late final stream = (buffer: const Stream<Duration>.empty(), error: errorController.stream, completed: completedController.stream);
+  void nativeLog(String prefix, String level, String text) {
+    $nativeDispatch
+  }
+  bool isPlayingStateChangeAllowed = false, lateEof = true, failSeek = false, lateOpenEof = false;
   Completer<void>? stopping;
+  Future<void> Function()? onOpen;
   Future<void> seek(Duration p) async {
     calls.add('seek:\${p.inSeconds}');
     if (failSeek) throw StateError('secret URL');
@@ -82,22 +137,38 @@ class Player {
     calls.add(args.join(':')); state.playing = args.last == 'no';
   }
   Future<void> stop() async { calls.add('stop'); await stopping?.future; state.position = Duration.zero; state.completed = false; }
-  Future<void> open(Media media, {required bool play}) async { calls.add('open:\${media.start.inSeconds}'); state.position = media.start; state.playing = play; }
+  Future<void> open(Media media, {required bool play}) async { calls.add('open:\${media.start.inSeconds}'); await onOpen?.call(); state.position = media.start; state.playing = play; if (lateOpenEof) state.completed = true; }
 }
-class Transport {
+class Transport implements BtrTransport {
+  @override dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
   Transport(this.player); final Player player;
   bool currentSeekHasLocalFailure = false;
+  final tracks = <String, BtrTrack>{};
+  void seek() { currentSeekHasLocalFailure = false; }
   Future<void> retirePlayerRequests() async { player.calls.add('retire'); }
 }
 typedef BtrPlayback = Session;
 class Session {
   Session(Player p): transport = Transport(p);
-  final Transport transport;
+  BtrTransport transport;
   final metrics = BtrMetrics(BtrMode.combined);
-  void seek(Duration p) { metrics.seek(p.inMilliseconds); transport.currentSeekHasLocalFailure = false; }
+  final readRecovery = BtrReadRecovery();
+  void seek(Duration p) { readRecovery.reset(); metrics.seek(p.inMilliseconds); transport.seek(); }
 }
 class Subject {
   Subject() { _btrPlayback = Session(_videoPlayerController!); }
+  final onlyPlayAudio = Value(false);
+  final _statusListeners = <void Function(Status)>[];
+  int completionCount = 0, terminalStops = 0;
+  void _startWakeLockTimer() {}
+  void makeHeartBeat(int value, {Beat? type}) { if (value == -1) completionCount++; }
+  void _stopTerminalBtr(Session s) { terminalStops++; }
+  void wire() {
+    final player = _videoPlayerController!;
+    player.stream.error.listen($errorCallback);
+    player.stream.completed.listen($completedCallback);
+  }
+  $handlers
   Player? _videoPlayerController = Player();
   Session? _btrPlayback;
   final _seekIntent = PlaybackSeekIntent()..reset(playing: true);
@@ -149,6 +220,12 @@ Future<void> main() async {
     c._videoPlayerController!.calls.clear();
     await c.refreshPlayer();
     check(c._videoPlayerController!.calls.take(3).join(',') == 'stop,retire,open:40', 'old requests survive reopen');
+  });
+  await scenario('late EOF after reopen cannot replay from zero', () async {
+    final c = Subject(); await c.seek(const Duration(seconds: 40));
+    c._videoPlayerController!.lateOpenEof = true;
+    await c.refreshPlayer();
+    check(c._videoPlayerController!.state.position.inSeconds == 40, 'reopen late EOF replayed zero');
   });
   await scenario('failed seek is diagnosed without a reopen', () async {
     final c = Subject(); c._videoPlayerController!.failSeek = true;
@@ -216,7 +293,7 @@ Future<void> main() async {
   await scenario('correlated local read failure reopens pending seek once at its target', () async {
     await runZoned(() async {
       final c = Subject(); await c.seek(const Duration(seconds: 40));
-      c._btrPlayback!.transport.currentSeekHasLocalFailure = true;
+      (c._btrPlayback!.transport as Transport).currentSeekHasLocalFailure = true;
       (c as dynamic)._scheduleBtrReadRecovery(c._btrPlayback!);
       await Future<void>.delayed(const Duration(milliseconds: 30));
       check(c._videoPlayerController!.calls.contains('open:40'), 'local failure did not recover target');
@@ -235,7 +312,7 @@ Future<void> main() async {
   });
   await scenario('new seek cancels recovery of old target', () async {
     final c = Subject(); await c.seek(const Duration(seconds: 40));
-    c._btrPlayback!.transport.currentSeekHasLocalFailure = true;
+    (c._btrPlayback!.transport as Transport).currentSeekHasLocalFailure = true;
     (c as dynamic)._scheduleBtrReadRecovery(c._btrPlayback!);
     final timer = c._retryTimer;
     await c.seek(const Duration(seconds: 50));
@@ -245,7 +322,7 @@ Future<void> main() async {
   await scenario('timeline recovery prevents a delayed reopen', () async {
     await runZoned(() async {
       final c = Subject(); await c.seek(const Duration(seconds: 40));
-      c._btrPlayback!.transport.currentSeekHasLocalFailure = true;
+      (c._btrPlayback!.transport as Transport).currentSeekHasLocalFailure = true;
       (c as dynamic)._scheduleBtrReadRecovery(c._btrPlayback!);
       c._seekIntent.position(const Duration(seconds: 40));
       c._seekIntent.position(const Duration(milliseconds: 40100));
@@ -254,6 +331,137 @@ Future<void> main() async {
     }, zoneSpecification: ZoneSpecification(createTimer: (self, parent, zone, duration, callback) =>
       parent.createTimer(zone, duration == const Duration(seconds: 3) ? const Duration(milliseconds: 5) : duration, callback)));
   });
+
+  Future<void> fast(Future<void> Function() work) => runZoned(work,
+    zoneSpecification: ZoneSpecification(createTimer: (self, parent, zone, duration, callback) =>
+      parent.createTimer(zone, duration == const Duration(seconds: 3) ? const Duration(milliseconds: 15) : duration, callback)));
+  await scenario('native ffmpeg HTTP error enters actual stream listener before any local failure', () => fast(() async {
+    final c = Subject()..wire(); await c.seek(const Duration(seconds: 40));
+    c._videoPlayerController!.nativeLog('ffmpeg', 'error', 'HTTP error 503 Service Unavailable');
+    check(c._retryTimer != null, 'native HTTP error bypassed recovery listener');
+    await Future<void>.delayed(const Duration(milliseconds: 40));
+    check(c._videoPlayerController!.calls.contains('open:40'), 'first native error needed a later proxy failure');
+    check(c._videoPlayerController!.calls.where((s) => s == 'stop').length == 1, 'not exactly one stop');
+  }));
+  await scenario('repeated native errors cannot postpone the first recovery deadline', () => fast(() async {
+    final c = Subject()..wire(); await c.seek(const Duration(seconds: 40));
+    final p = c._videoPlayerController!;
+    p.nativeLog('ffmpeg', 'error', '[tcp @ 0x123] ffurl_read returned 0xffffff99');
+    final first = c._retryTimer;
+    check(first != null, 'prefixed read error lost');
+    for (var i = 0; i < 20; i++) p.nativeLog('ffmpeg', 'error', 'tcp: ffurl_read returned -5');
+    check(identical(first, c._retryTimer), 'error burst reset recovery deadline');
+    await Future<void>.delayed(const Duration(milliseconds: 40));
+    p.nativeLog('ffmpeg', 'error', 'HTTP error 503 Service Unavailable');
+    await Future<void>.delayed(const Duration(milliseconds: 40));
+    check(p.calls.where((s) => s.startsWith('open:')).length == 1, 'native errors bypassed retry budget');
+  }));
+  await scenario('read-error completed at mid-file cannot auto-next and resumes saved position', () => fast(() async {
+    final c = Subject()..wire(); final p = c._videoPlayerController!;
+    p.state.position = const Duration(seconds: 37); p.state.buffer = const Duration(seconds: 42);
+    c.buffered.value = 42;
+    p.nativeLog('ffmpeg', 'error', 'HTTP error 503 Service Unavailable');
+    p.state.completed = true; p.state.playing = false; p.state.buffering = false;
+    p.completedController.add(true);
+    check(c.completionCount == 0, 'read failure published natural completion');
+    p.state.position = Duration.zero;
+    await Future<void>.delayed(const Duration(milliseconds: 40));
+    check(p.calls.contains('open:37'), 'abnormal EOF lost saved position');
+    check(!p.calls.contains('replay:0'), 'abnormal EOF replayed zero');
+  }));
+  await scenario('premature EOF without read evidence is suppressed but never retries by guess', () async {
+    final c = Subject()..wire(); final p = c._videoPlayerController!;
+    p.state.position = const Duration(seconds: 37); p.completedController.add(true);
+    check(c.completionCount == 0, 'premature EOF accepted');
+    check(c._retryTimer == null, 'EOF alone invented a read failure');
+  });
+  await scenario('natural EOF and deliberate end seek still publish completed', () async {
+    final c = Subject()..wire(); final p = c._videoPlayerController!;
+    p.state.position = p.state.duration; p.completedController.add(true);
+    check(c.completionCount == 1, 'natural EOF swallowed');
+    await c.seek(p.state.duration); p.completedController.add(true);
+    check(c.completionCount == 2, 'explicit end seek swallowed');
+  });
+  await scenario('native recovery respects pause and cancels on newer seek or source', () => fast(() async {
+    final c = Subject()..wire(); await c.seek(const Duration(seconds: 40));
+    final p = c._videoPlayerController!;
+    p.nativeLog('ffmpeg', 'error', 'HTTP error 503 Service Unavailable');
+    await c.seek(const Duration(seconds: 50));
+    await Future<void>.delayed(const Duration(milliseconds: 40));
+    check(!p.calls.contains('stop'), 'old error unloaded newer seek');
+    p.nativeLog('ffmpeg', 'error', 'HTTP error 503 Service Unavailable');
+    c._seekIntent.requestPlaying(false);
+    await Future<void>.delayed(const Duration(milliseconds: 40));
+    check(p.calls.contains('open:50') && !p.state.playing, 'pause/latest target lost');
+    final d = Subject()..wire(); await d.seek(const Duration(seconds: 40));
+    d._videoPlayerController!.nativeLog('ffmpeg', 'error', 'HTTP error 503 Service Unavailable');
+    d._btrOpenGeneration++; d._btrPlayback = Session(d._videoPlayerController!);
+    await Future<void>.delayed(const Duration(milliseconds: 40));
+    check(!d._videoPlayerController!.calls.contains('stop'), 'old source recovery survived');
+  }));
+  await scenario('decoder/audio errors and warnings do not trigger transport reopen', () async {
+    final c = Subject()..wire(); final p = c._videoPlayerController!;
+    p.nativeLog('ad', 'error', 'Could not open codec secret');
+    p.nativeLog('ffmpeg', 'warn', 'HTTP error 503 Service Unavailable');
+    p.nativeLog('ao', 'error', 'audio output failed');
+    check(c._retryTimer == null, 'non-read error retried source');
+  });
+  await scenario('original path retains existing completed behavior and HTTP error handling', () async {
+    final c = Subject()..wire(); c._btrPlayback = null;
+    final p = c._videoPlayerController!;
+    p.state.position = const Duration(seconds: 37); p.completedController.add(true);
+    p.nativeLog('ffmpeg', 'error', 'HTTP error 503 Service Unavailable');
+    check(c.completionCount == 1 && c._retryTimer == null, 'original path changed');
+  });
+
+  await scenario('native error listener retires four actual blocked sockets before exact dual-track reload', () => fast(() async {
+    final bytes = Uint8List.fromList(List.generate(16 * 1024 * 1024, (i) => i % 251));
+    final cdn = FakeCdn(bytes)..audioBytes = Uint8List.fromList(bytes.map((b) => b ^ 0x55).toList());
+    await cdn.start();
+    final metrics = BtrMetrics(BtrMode.combined), scheduler = BtrScheduler();
+    final transport = BtrTransport(mode: BtrMode.combined, metrics: metrics,
+      scheduler: scheduler, network: FakeNetwork(scheduler, metrics, cdn));
+    final sockets = <Socket>[];
+    final c = Subject()..wire(); final p = c._videoPlayerController!;
+    c._btrPlayback!.transport = transport;
+    try {
+      final urls = await transport.start([for (final kind in ['video', 'audio'])
+        BtrTrackSpec(kind: kind, urls: ['https://origin.bilivideo.com/\$kind.m4s'])]);
+      for (final kind in ['video', 'audio', 'video', 'audio']) {
+        final uri = Uri.parse(urls[kind]!);
+        final socket = await Socket.connect(uri.host, uri.port); sockets.add(socket);
+        socket.write('GET \${uri.path} HTTP/1.1\\r\\nHost: \${uri.host}:\${uri.port}\\r\\nRange: bytes=0-\\r\\n\\r\\n');
+        await socket.flush();
+      }
+      await waitUntil(() => transport.snapshot()['activeProxyHandlers'] == 4 &&
+        (transport.snapshot()['tracks'] as List).every((t) => (t['demands'] as List).any((d) => d['stage'] == 'proxy-write' && d['progressAgeMs'] >= 50)));
+      await c.seek(const Duration(seconds: 40));
+      check(metrics.cancellations == 0, 'seek cancelled valid GETs');
+      try { await fetchLocal(urls['video']!, range: 'bytes=-100'); throw StateError('expected capacity 503'); }
+      on BtrFailure catch (e) {
+        check(e.status == 503, 'unexpected local status');
+        p.nativeLog('ffmpeg', 'error', 'HTTP error 503 Service Unavailable');
+      }
+      final opened = Completer<void>();
+      p.onOpen = () async {
+        check(transport.snapshot()['activeProxyHandlers'] == 0 && scheduler.active == 0 && scheduler.queued == 0, 'reload overtook cleanup');
+        for (final t in transport.snapshot()['tracks'] as List) check(t['orderedReservationBytes'] == 0, 'reservation leak');
+        final v = await fetchLocal(urls['video']!, range: 'bytes=-100');
+        final a = await fetchLocal(urls['audio']!, range: 'bytes=-100');
+        check(v.length == 100 && a.length == 100, 'reload byte count');
+        for (var i = 0; i < 100; i++) {
+          check(v[i] == bytes[bytes.length-100+i] && a[i] == (v[i] ^ 0x55), 'reload mixed or corrupted tracks');
+        }
+        opened.complete();
+      };
+      await opened.future.timeout(const Duration(seconds: 4));
+      check(transport.snapshot()['peakProxyHandlers'] == 4, 'handler cap changed');
+      check(metrics.terminalFailures == 0, 'retirement became terminal failure');
+    } finally {
+      c._retryTimer?.cancel(); for (final s in sockets) s.destroy();
+      await transport.close(); await cdn.close();
+    }
+  }));
   if (failures.isNotEmpty) throw StateError(failures.join(', '));
 }
 ''');

@@ -1,6 +1,7 @@
 import 'dart:collection';
 
 import 'package:PiliPlus/services/btr/policy.dart';
+import 'package:PiliPlus/services/btr/read_recovery.dart';
 
 /// 250 ms buckets bound storage independently of the number of HTTP chunks.
 class _ByteRate {
@@ -68,6 +69,51 @@ class BtrMetrics {
   bool? _buffering;
   int? nativeQueueBytes;
   int? nativeInputBps;
+  Map<String, Object?>? nativeAvProbe;
+  Map<String, Object?>? previousNativeAvProbe;
+  Map<String, Object?>? nativeAvBeforeCompleted;
+
+  // Two numeric/boolean snapshots only; unknown/unsupported properties stay null.
+  // These observations cannot establish audible sound or rendered Android frames.
+  void sampleNativeAv(String Function(String) read) {
+    Object? value(String key, bool boolean) {
+      try {
+        final raw = read(key);
+        if (boolean) {
+          return switch (raw) {
+            'yes' => true,
+            'no' => false,
+            _ => null,
+          };
+        }
+        final n = double.tryParse(raw);
+        return n != null && n.isFinite ? n : null;
+      } catch (_) {
+        return null;
+      }
+    }
+
+    previousNativeAvProbe = nativeAvProbe;
+    nativeAvProbe = {
+      'atMs': now() - openedAt,
+      for (final key in [
+        'audio-pts',
+        'audio-out-params/samplerate',
+        'audio-out-params/channel-count',
+        'frame-drop-count',
+      ])
+        key: value(key, false),
+      for (final key in [
+        'mute',
+        'ao-mute',
+        'paused-for-cache',
+        'core-idle',
+        'eof-reached',
+      ])
+        key: value(key, true),
+    };
+  }
+
   final events = Queue<Map<String, Object>>();
   final deliveredByTrack = <String, int>{};
   final networkByTrack = <String, int>{};
@@ -145,6 +191,7 @@ class BtrMetrics {
 
   void nativeCompleted(bool value) {
     if (value && completed != true) {
+      nativeAvBeforeCompleted = nativeAvProbe;
       audioTracksBeforeCompleted = nativeAudioTracks;
       audioSelectedBeforeCompleted = nativeAudioSelected;
       event('player-completed', {
@@ -154,6 +201,16 @@ class BtrMetrics {
       });
     }
     completed = value;
+  }
+
+  void nativeLog(String prefix, String level, String text) {
+    if (level != 'error' && level != 'fatal') return;
+    const known = {'ffmpeg', 'ad', 'vd', 'ao', 'cplayer', 'stream', 'file'};
+    event('native-error-origin', {
+      'origin': known.contains(prefix) ? prefix : 'other',
+      'level': level,
+      'readKind': BtrReadRecovery.classify(text) ?? 'unclassified',
+    });
   }
 
   // Categorize native errors without storing URLs, signed queries, codec names,
@@ -244,6 +301,9 @@ class BtrMetrics {
       'terminalFailures': measured ? terminalFailures : null,
       'playerErrors': playing == null ? null : playerErrors,
       'separateAudioExpected': separateAudioExpected,
+      'nativeAvProbe': nativeAvProbe,
+      'previousNativeAvProbe': previousNativeAvProbe,
+      'nativeAvBeforeCompleted': nativeAvBeforeCompleted,
       'nativeAudioTrackCount': nativeAudioTracks,
       'maxNativeAudioTrackCount': maxNativeAudioTracks,
       'nativeAudioTracksBeforeCompleted': audioTracksBeforeCompleted,
