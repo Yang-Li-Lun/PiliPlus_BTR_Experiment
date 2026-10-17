@@ -47,7 +47,7 @@ void main() {
       for (var i = 0; i < 200; i++) {
         m.sampleNativeAv((_) => throw StateError('secret'));
       }
-      expect(m.nativeAvProbe!.length, 10);
+      expect(m.nativeAvProbe!.length, 18);
       expect(m.snapshot().toString(), isNot(contains('secret')));
       m
         ..nativeLog('secret-device', 'error', 'private URL')
@@ -111,6 +111,87 @@ void main() {
       expect(report, isNot(contains(sensitive)));
     }
   });
+
+  test(
+    'child native log origins and reply failures retain only fixed codes',
+    () {
+      final m = BtrMetrics(BtrMode.combined);
+      for (final prefix in [
+        'ao/aaudio',
+        'ao/audiotrack',
+        'vd/ffmpeg',
+        'ad/secret-codec',
+        'demux/lavf',
+        'vo/gpu/secret-path',
+        'native',
+        'ao-secret-device',
+      ]) {
+        m.nativeLog(prefix, 'error', 'secret URL cookie token');
+      }
+      m.nativeLog(
+        'native',
+        'error',
+        'Received MPV_EVENT_REPLY with unregistered ID 123-secret',
+      );
+      final data = m.snapshot();
+      expect(data['nativeErrorOrigins'], {
+        'ao': 2,
+        'vd': 1,
+        'ad': 1,
+        'demux': 1,
+        'vo': 1,
+        'native': 2,
+        'other': 1,
+      });
+      expect(data['nativeErrorKinds'], {
+        'unclassified': 8,
+        'unregistered-reply': 1,
+      });
+      expect(data.toString(), isNot(contains('secret')));
+      expect(data.toString(), isNot(contains('123')));
+    },
+  );
+
+  test(
+    'output drivers and first/last error AV context are bounded and sanitized',
+    () {
+      final m = BtrMetrics(BtrMode.combined)
+        ..sampleNativeAv(
+          (key) => switch (key) {
+            'current-ao' => 'null',
+            'current-vo' => 'gpu',
+            'vo-configured' => 'yes',
+            'avsync' => '-0.02',
+            'audio-pts' => '12.5',
+            _ => '',
+          },
+        )
+        ..nativeLog('ao/aaudio', 'error', 'secret-device')
+        ..sampleNativeAv(
+          (key) => switch (key) {
+            'current-ao' => 'aaudio',
+            'current-vo' => 'secret-driver',
+            'avsync' => 'Infinity',
+            'time-pos' => 'NaN',
+            'audio-pts' => '13.0',
+            _ => 'secret',
+          },
+        );
+      for (var i = 0; i < 300; i++) {
+        m.nativeLog('vd/ffmpeg', 'error', 'secret-codec');
+      }
+      expect(m.events.length, 128);
+      expect(m.nativeAvAtFirstError!['current-ao'], 'null');
+      expect(m.nativeAvAtFirstError!['vo-configured'], true);
+      expect(m.nativeAvAtFirstError!['avsync'], -0.02);
+      expect(m.nativeAvAtLastError!['current-ao'], 'aaudio');
+      expect(m.nativeAvAtLastError!['current-vo'], isNull);
+      expect(m.nativeAvProbe!['avsync'], isNull);
+      expect(m.nativeAvProbe!['time-pos'], isNull);
+      expect(m.nativeAvProbe!.length, 18);
+      expect(m.snapshot().toString(), isNot(contains('secret')));
+    },
+  );
 
   test('unobserved native audio state remains unknown', () {
     final snapshot = BtrMetrics(BtrMode.combined).snapshot();

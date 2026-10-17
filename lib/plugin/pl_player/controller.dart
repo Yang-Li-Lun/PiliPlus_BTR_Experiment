@@ -1114,6 +1114,7 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
           session?.readRecovery.resumePosition ??
           ctr.state.position;
       final seekRevision = _seekIntent.seekRevision;
+      final readRevision = session?.readRecovery.revision;
       if (!isLive) media = media.copyWith(start: target);
       return _sourceSequence
           .runCurrent((isCurrent) async {
@@ -1126,6 +1127,17 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
             if (automatic && seekRevision != _seekIntent.seekRevision) {
               session?.metrics.event('player-reopen-skipped', {
                 'reason': 'new-seek',
+              });
+              return;
+            }
+            // The timer may have fired before this operation obtained the
+            // source queue. Timeline progress in that wait invalidates the
+            // read evidence for non-seek recovery as well as seek recovery.
+            if (automatic &&
+                session?.transport != null &&
+                readRevision != session!.readRecovery.revision) {
+              session.metrics.event('player-reopen-skipped', {
+                'reason': 'read-evidence-stale',
               });
               return;
             }
@@ -1239,11 +1251,23 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
         _btrFailedGeneration == _btrOpenGeneration) {
       return;
     }
+    final waiting =
+        player.state.buffering || session.readRecovery.abnormalCompleted;
+    final eligible = _seekIntent.playRequested && !_processing && !_reopening;
+    // A classified native read error can arrive while open/reopen owns the
+    // source queue. Reconsider that latched evidence after opening finishes;
+    // no second native error or proxy failure is required to arm the timer.
+    if (eligible &&
+        session.readRecovery.failed &&
+        (waiting || _seekIntent.pendingTarget != null) &&
+        _btrAutomaticReopens < 1) {
+      _scheduleBtrReadRecovery(session);
+    }
     if (!session.readRecovery.observeStall(
       now: session.metrics.now(),
       position: player.state.position,
-      waiting: player.state.buffering || session.readRecovery.abnormalCompleted,
-      eligible: _seekIntent.playRequested && !_processing && !_reopening,
+      waiting: waiting,
+      eligible: eligible,
       failureAt: session.transport!.currentReadFailureAt,
     )) {
       return;

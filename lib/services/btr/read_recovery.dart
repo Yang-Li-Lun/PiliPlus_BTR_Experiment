@@ -10,7 +10,8 @@ class BtrReadRecovery {
   Duration? _stallPosition;
 
   /// A stationary clock alone is not a transport failure. Require prolonged
-  /// waiting AND recent, same-generation proxy/head failure evidence.
+  /// waiting AND either a latched classified native read failure or recent,
+  /// same-generation proxy/head failure evidence. Seek/load/progress reset both.
   bool observeStall({
     required int now,
     required Duration position,
@@ -29,9 +30,10 @@ class BtrReadRecovery {
     }
     if (_stallSince == null ||
         now - _stallSince! < 15000 ||
-        failureAt == null ||
-        failureAt < _stallSince! - 1000 ||
-        now - failureAt > 30000) {
+        (!failed &&
+            (failureAt == null ||
+                failureAt < _stallSince! - 1000 ||
+                now - failureAt > 30000))) {
       return false;
     }
     failed = true;

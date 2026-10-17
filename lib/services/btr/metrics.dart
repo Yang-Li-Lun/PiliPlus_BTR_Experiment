@@ -72,8 +72,11 @@ class BtrMetrics {
   Map<String, Object?>? nativeAvProbe;
   Map<String, Object?>? previousNativeAvProbe;
   Map<String, Object?>? nativeAvBeforeCompleted;
+  Map<String, Object?>? nativeAvAtFirstError;
+  Map<String, Object?>? nativeAvAtLastError;
 
-  // Two numeric/boolean snapshots only; unknown/unsupported properties stay null.
+  // Fixed numeric/boolean/allowlisted-driver snapshots only. Unknown or
+  // unsupported properties stay null; never read device names or track titles.
   // These observations cannot establish audible sound or rendered Android frames.
   void sampleNativeAv(String Function(String) read) {
     Object? value(String key, bool boolean) {
@@ -93,14 +96,28 @@ class BtrMetrics {
       }
     }
 
+    String? driver(String key, Set<String> allowed) {
+      try {
+        final raw = read(key);
+        return allowed.contains(raw) ? raw : null;
+      } catch (_) {
+        return null;
+      }
+    }
+
     previousNativeAvProbe = nativeAvProbe;
     nativeAvProbe = {
       'atMs': now() - openedAt,
       for (final key in [
         'audio-pts',
+        'time-pos',
+        'avsync',
+        'audio-params/samplerate',
         'audio-out-params/samplerate',
         'audio-out-params/channel-count',
         'frame-drop-count',
+        'decoder-frame-drop-count',
+        'vo-delayed-frame-count',
       ])
         key: value(key, false),
       for (final key in [
@@ -109,8 +126,22 @@ class BtrMetrics {
         'paused-for-cache',
         'core-idle',
         'eof-reached',
+        'vo-configured',
       ])
         key: value(key, true),
+      'current-ao': driver('current-ao', {
+        'aaudio',
+        'audiotrack',
+        'opensles',
+        'null',
+      }),
+      'current-vo': driver('current-vo', {
+        'gpu',
+        'gpu-next',
+        'libmpv',
+        'mediacodec_embed',
+        'null',
+      }),
     };
   }
 
@@ -121,6 +152,7 @@ class BtrMetrics {
   final _deliveryRates = <String, _ByteRate>{};
   int droppedEvents = 0;
   final nativeErrorOrigins = <String, int>{};
+  final nativeErrorKinds = <String, int>{};
   Map<String, Object>? firstNativeError;
   Map<String, Object>? lastNativeError;
 
@@ -208,15 +240,31 @@ class BtrMetrics {
 
   void nativeLog(String prefix, String level, String text) {
     if (level != 'error' && level != 'fatal') return;
-    const known = {'ffmpeg', 'ad', 'vd', 'ao', 'cplayer', 'stream', 'file'};
-    final origin = known.contains(prefix) ? prefix : 'other';
+    // mpv uses child log namespaces such as ao/aaudio and vd/ffmpeg.
+    // Store only the fixed parent category, never the arbitrary suffix.
+    final origin =
+        RegExp(
+          r'^(ffmpeg|ad|vd|ao|vo|cplayer|stream|demux|file|native)(?:/|$)',
+        ).firstMatch(prefix)?.group(1) ??
+        'other';
+    final readKind = BtrReadRecovery.classify(text);
+    final kind =
+        text.startsWith('Received MPV_EVENT_REPLY with unregistered ID ')
+        ? 'unregistered-reply'
+        : readKind != null
+        ? 'read'
+        : 'unclassified';
     nativeErrorOrigins.update(origin, (n) => n + 1, ifAbsent: () => 1);
+    nativeErrorKinds.update(kind, (n) => n + 1, ifAbsent: () => 1);
     final detail = <String, Object>{
       'atMs': now() - openedAt,
       'origin': origin,
       'level': level,
-      'readKind': BtrReadRecovery.classify(text) ?? 'unclassified',
+      'readKind': readKind ?? 'unclassified',
+      'kind': kind,
     };
+    if (firstNativeError == null) nativeAvAtFirstError = nativeAvProbe;
+    nativeAvAtLastError = nativeAvProbe;
     firstNativeError ??= detail;
     lastNativeError = detail;
     event('native-error-origin', detail);
@@ -286,6 +334,7 @@ class BtrMetrics {
         defaultValue: 'unidentified',
       ),
       'nativeErrorOrigins': Map<String, int>.of(nativeErrorOrigins),
+      'nativeErrorKinds': Map<String, int>.of(nativeErrorKinds),
       'firstNativeError': firstNativeError == null
           ? null
           : Map<String, Object>.of(firstNativeError!),
@@ -324,6 +373,8 @@ class BtrMetrics {
       'nativeAvProbe': nativeAvProbe,
       'previousNativeAvProbe': previousNativeAvProbe,
       'nativeAvBeforeCompleted': nativeAvBeforeCompleted,
+      'nativeAvAtFirstError': nativeAvAtFirstError,
+      'nativeAvAtLastError': nativeAvAtLastError,
       'nativeAudioTrackCount': nativeAudioTracks,
       'maxNativeAudioTrackCount': maxNativeAudioTracks,
       'nativeAudioTracksBeforeCompleted': audioTracksBeforeCompleted,

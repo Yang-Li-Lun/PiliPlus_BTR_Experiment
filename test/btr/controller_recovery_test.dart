@@ -349,6 +349,78 @@ Future<void> main() async {
     check(c._videoPlayerController!.calls.contains('open:40'), 'first native error needed a later proxy failure');
     check(c._videoPlayerController!.calls.where((s) => s == 'stop').length == 1, 'not exactly one stop');
   }));
+  await scenario('read failure during opening is reconsidered after opening finishes', () => fast(() async {
+    final c = Subject()..wire(); final p = c._videoPlayerController!;
+    final s = c._btrPlayback!;
+    c._processing = true;
+    p.state.position = const Duration(seconds: 37);
+    p.nativeLog('ffmpeg', 'error', 'HTTP error 503 Service Unavailable');
+    p.completedController.add(true);
+    check(c._retryTimer == null, 'recovery ran inside open');
+    check(s.readRecovery.failed && s.readRecovery.abnormalCompleted, 'read evidence lost');
+    check(s.transport.currentReadFailureAt == null, 'test invented a proxy failure');
+    c._processing = false;
+    (c as dynamic)._checkBtrReadStall(s);
+    await Future<void>.delayed(const Duration(milliseconds: 40));
+    check(p.calls.contains('open:37'), 'opening-time native failure was never reconsidered');
+    check(c.completionCount == 0, 'read error became natural EOF');
+  }));
+  await scenario('queued non-seek read recovery yields to resumed playback', () => fast(() async {
+    final c = Subject()..wire(); final p = c._videoPlayerController!;
+    final s = c._btrPlayback!, held = Completer<void>();
+    final owner = c._sourceSequence.runCurrent((_) => held.future);
+    p.state.position = const Duration(seconds: 37);
+    p.state.buffering = true; c.isBuffering.value = true;
+    p.nativeLog('ffmpeg', 'error', 'HTTP error 503 Service Unavailable');
+    await Future<void>.delayed(const Duration(milliseconds: 40));
+    check(c._reopening, 'retry did not reach the source queue');
+    p.state.buffering = false; c.isBuffering.value = false;
+    s.readRecovery.position(const Duration(seconds: 37), advancing: true);
+    s.readRecovery.position(const Duration(seconds: 38), advancing: true);
+    held.complete(); await owner;
+    await Future<void>.delayed(const Duration(milliseconds: 20));
+    check(!p.calls.contains('stop'), 'queued recovery unloaded recovered playback');
+    check(c._btrAutomaticReopens == 0, 'stale recovery consumed automatic budget');
+  }));
+  await scenario('deferred opening-time failure respects pause, reset, source and task close', () => fast(() async {
+    for (final mode in ['pause', 'reset', 'source', 'closed', 'progress']) {
+      final c = Subject()..wire(); final p = c._videoPlayerController!;
+      final s = c._btrPlayback!;
+      c._processing = true;
+      p.nativeLog('ffmpeg', 'error', 'HTTP error 503 Service Unavailable');
+      p.completedController.add(true);
+      c._processing = false;
+      if (mode == 'pause') c._seekIntent.requestPlaying(false);
+      if (mode == 'reset') s.seek(const Duration(seconds: 50));
+      if (mode == 'source') c._btrSourceIsCurrent = () => false;
+      if (mode == 'closed') c._taskScope.closed = true;
+      if (mode == 'progress') {
+        s.readRecovery.position(const Duration(seconds: 37), advancing: true);
+        s.readRecovery.position(const Duration(seconds: 38), advancing: true);
+      }
+      (c as dynamic)._checkBtrReadStall(s);
+      await Future<void>.delayed(const Duration(milliseconds: 40));
+      check(!p.calls.contains('stop'), 'deferred failure ignored guard: \$mode');
+      check(c._retryTimer == null, 'deferred invalid evidence armed timer: \$mode');
+    }
+  }));
+  await scenario('exhausted native-only read recovery ends sustained waiting', () async {
+    final c = Subject()..wire(); final p = c._videoPlayerController!;
+    final s = c._btrPlayback!;
+    c._btrAutomaticReopens = 1;
+    p.state.position = const Duration(seconds: 37);
+    p.state.buffering = true; c.isBuffering.value = true;
+    p.nativeLog('ffmpeg', 'error', 'HTTP error 503 Service Unavailable');
+    check(s.transport.currentReadFailureAt == null, 'test invented a proxy failure');
+    (c as dynamic)._checkBtrReadStall(s);
+    s.now = 14999; (c as dynamic)._checkBtrReadStall(s);
+    check(c._btrFailedGeneration == -1, 'short native wait stopped playback');
+    s.now = 15000; (c as dynamic)._checkBtrReadStall(s);
+    await Future<void>.delayed(Duration.zero);
+    check(c._btrFailedGeneration == c._btrOpenGeneration, 'native-only exhausted recovery waits forever');
+    check(p.calls.contains('pause') && p.calls.contains('transport-close'), 'exhausted recovery did not clean up');
+    check(!p.calls.contains('stop'), 'retry budget was bypassed');
+  });
   await scenario('repeated native errors cannot postpone the first recovery deadline', () => fast(() async {
     final c = Subject()..wire(); await c.seek(const Duration(seconds: 40));
     final p = c._videoPlayerController!;
