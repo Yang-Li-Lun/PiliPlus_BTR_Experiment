@@ -47,6 +47,10 @@ class BtrMetrics {
   int resumedBytes = 0;
   int bufferingEvents = 0;
   int playerErrors = 0;
+  bool? separateAudioExpected;
+  int? nativeAudioTracks;
+  bool? nativeAudioSelected;
+  double? nativePlayerVolume;
   int? startupMs;
   bool? playing;
   bool? completed;
@@ -101,6 +105,27 @@ class BtrMetrics {
     _seekTarget = positionMs;
     _previousPosition = null;
     event('seek');
+  }
+
+  // Categorize native errors without storing URLs, signed queries, codec names,
+  // file paths or arbitrary decoder messages. A category is not a root cause.
+  void playerError(String message, {required bool transportTerminal}) {
+    playerErrors++;
+    final lower = message.toLowerCase();
+    final category = lower.contains('http://127.0.0.1')
+        ? 'proxy-read'
+        : lower.contains('audio') || lower.contains('ao/')
+        ? 'audio'
+        : lower.contains('codec') || lower.contains('decoder')
+        ? 'decoder'
+        : lower.contains('http') || lower.contains('ffurl_read')
+        ? 'network'
+        : 'other';
+    event('player-error', {
+      'category': category,
+      'transportTerminal': transportTerminal,
+      'seekPending': _seekAt != null,
+    });
   }
 
   void buffering(bool value) {
@@ -169,6 +194,10 @@ class BtrMetrics {
       'requestFailures': measured ? requestFailures : null,
       'terminalFailures': measured ? terminalFailures : null,
       'playerErrors': playing == null ? null : playerErrors,
+      'separateAudioExpected': separateAudioExpected,
+      'nativeAudioTrackCount': nativeAudioTracks,
+      'nativeAudioSelected': nativeAudioSelected,
+      'nativePlayerVolume': nativePlayerVolume,
       'networkBytesIncludingProbesAndHedges': measured ? networkBytes : null,
       'networkBps5s': measured
           ? networkRates.values.fold<double>(0, (a, b) => a + b)

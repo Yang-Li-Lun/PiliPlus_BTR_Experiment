@@ -282,7 +282,7 @@ void main() {
   );
 
   test(
-    'seek cancels old work and new offset is exact, including suffix range',
+    'seek with client disconnect cancels old work and new offset is exact',
     () async {
       cdn.handler = (r, range, n) async {
         if (range.start > 0 && range.start < 500000) {
@@ -291,10 +291,19 @@ void main() {
         return false;
       };
       await start(stall: const Duration(seconds: 1));
-      final old = fetchLocal(urls['video']!);
+      final oldClient = HttpClient();
+      addTearDown(() => oldClient.close(force: true));
+      final old = () async {
+        final request = await oldClient.getUrl(Uri.parse(urls['video']!));
+        final response = await request.close();
+        await response.drain<void>();
+      }();
       final failedOld = expectLater(old, throwsA(anything));
       await Future<void>.delayed(const Duration(milliseconds: 80));
       transport.seek();
+      // A real low-level seek abandons the old HTTP response. A cached seek
+      // may keep consuming it, so the notification alone must not cut it off.
+      oldClient.close(force: true);
       final next = await fetchLocal(
         urls['video']!,
         range: 'bytes=1000000-1100000',
@@ -306,6 +315,7 @@ void main() {
         orderedEquals(data.sublist(data.length - 100)),
       );
       expect(transport.tracks['video']!.terminal, isFalse);
+      await transport.settled;
       expect(scheduler.active, 0);
     },
   );

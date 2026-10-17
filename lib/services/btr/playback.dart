@@ -49,6 +49,8 @@ class BtrPlayback {
       return (null, source);
     }
     final playback = BtrPlayback(selectedSettings);
+    playback.metrics.separateAudioExpected =
+        source.audioSource?.isNotEmpty == true;
     try {
       await settingsStore.load();
     } catch (_) {
@@ -102,8 +104,19 @@ class BtrPlayback {
     }
   }
 
-  void attach(Player player) {
+  void attach(Player player, {void Function()? onTerminalFailure}) {
     if (_closed) return;
+    var terminalReported = false;
+    void reportTerminal() {
+      if (_closed ||
+          terminalReported ||
+          transport?.tracks.values.any((track) => track.terminal) != true) {
+        return;
+      }
+      terminalReported = true;
+      onTerminalFailure?.call();
+    }
+
     Duration? observedBuffer;
     metrics.playing = player.state.playing;
     _subscriptions.add(player.stream.buffering.listen(metrics.buffering));
@@ -122,12 +135,32 @@ class BtrPlayback {
       }),
     );
     _subscriptions.add(
-      player.stream.error.listen((_) {
-        metrics.playerErrors++;
-        metrics.event('player-error'); // Never retain mpv's raw error/URL.
+      player.stream.tracks.listen((tracks) {
+        metrics.nativeAudioTracks = tracks.audio
+            .where((track) => track.id != 'auto' && track.id != 'no')
+            .length;
+      }),
+    );
+    _subscriptions.add(
+      player.stream.track.listen((track) {
+        metrics.nativeAudioSelected = track.audio.id == 'auto'
+            ? null
+            : track.audio.id != 'no';
+      }),
+    );
+    _subscriptions.add(
+      player.stream.error.listen((message) {
+        metrics.playerError(
+          message,
+          transportTerminal:
+              transport?.tracks.values.any((track) => track.terminal) ?? false,
+        );
+        reportTerminal();
       }),
     );
     _meter = Timer.periodic(const Duration(milliseconds: 500), (_) {
+      reportTerminal();
+      metrics.nativePlayerVolume = player.state.volume;
       metrics.bufferAheadSeconds = observedBuffer == null
           ? null
           : ((observedBuffer! - player.state.position).inMilliseconds / 1000)
