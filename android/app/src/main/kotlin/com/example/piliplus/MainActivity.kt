@@ -10,6 +10,13 @@ import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 
 class MainActivity : FlutterActivity() {
+    override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
+        super.configureFlutterEngine(flutterEngine)
+        if (!flutterEngine.plugins.has(BtrDiagnosticsExport::class.java)) {
+            flutterEngine.plugins.add(BtrDiagnosticsExport())
+        }
+    }
+
     // Retain the audio_service engine without AudioServiceActivity's unconditional
     // stop() in onDestroy(). The real onTaskRemoved callback must finish Dart/mpv
     // cleanup before the handler publishes idle and lets the service stop.

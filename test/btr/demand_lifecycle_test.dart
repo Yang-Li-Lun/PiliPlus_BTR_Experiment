@@ -1,8 +1,10 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:PiliPlus/services/btr/metrics.dart';
+import 'package:PiliPlus/services/btr/diagnostics.dart';
 import 'package:PiliPlus/services/btr/policy.dart';
 import 'package:PiliPlus/services/btr/scheduler.dart';
 import 'package:PiliPlus/services/btr/transport.dart';
@@ -124,6 +126,58 @@ void main() {
     ]);
     await Future.wait(transport.tracks.values.map((t) => t.initialize()));
   }
+
+  test(
+    'full and compact exports preserve real in-flight transport snapshots',
+    () async {
+      final held = Completer<void>();
+      addTearDown(() {
+        if (!held.isCompleted) held.complete();
+      });
+      cdn.handler = (r, range, n) async {
+        if (range.start == 1000000) await held.future;
+        return false;
+      };
+      transport.seek();
+      final request = fetchLocal(
+        urls['video']!,
+        range: 'bytes=1000000-1065535',
+      );
+      final checked = expectLater(
+        request,
+        completion(orderedEquals(video.sublist(1000000, 1065536))),
+      );
+      await waitUntil(() => cdn.requests.any((r) => r.$2.start == 1000000));
+      final snapshot = {...metrics.snapshot(), ...transport.snapshot()};
+      final data = BtrDiagnostics.report(
+        selectedSettings: {'mode': 'combined'},
+        current: snapshot,
+        recent: [],
+      );
+      for (final json in [
+        BtrDiagnostics.full(data),
+        BtrDiagnostics.compact(data),
+      ]) {
+        final decoded = (jsonDecode(json) as Map)['current'] as Map;
+        final track = (decoded['tracks'] as List).first as Map;
+        expect(decoded['activeConnections'], greaterThan(0));
+        expect(decoded['activeProxyHandlers'], 1);
+        expect(decoded['queuedConnections'], isNonNegative);
+        expect(decoded['concurrencyLimit'], 8);
+        expect(track['host'], BtrSourcePolicy.preferred);
+        expect(decoded['tracks'], snapshot['tracks']);
+        expect(track['activeDemands'], 1);
+        expect(track['orderedReservationBytes'], greaterThan(0));
+        expect((track['demands'] as List).first['generation'], 1);
+        expect((track['demands'] as List).first['stage'], 'upstream');
+        expect(json, isNot(contains('fixture-v1')));
+        expect(json, isNot(contains('http://')));
+      }
+      held.complete();
+      await checked;
+      await transport.settled;
+    },
+  );
 
   for (final newer in [false, true]) {
     test(

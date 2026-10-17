@@ -1,10 +1,10 @@
 import 'dart:async';
-import 'dart:convert';
 import 'dart:io';
 
 import 'package:PiliPlus/http/browser_ua.dart';
 import 'package:PiliPlus/http/constants.dart';
 import 'package:PiliPlus/plugin/pl_player/models/data_source.dart';
+import 'package:PiliPlus/services/btr/diagnostics.dart';
 import 'package:PiliPlus/services/btr/metrics.dart';
 import 'package:PiliPlus/services/btr/policy.dart';
 import 'package:PiliPlus/services/btr/read_recovery.dart';
@@ -212,22 +212,30 @@ class BtrPlayback {
     transport?.seek();
   }
 
-  Map<String, Object?> snapshot() => {
-    ...metrics.snapshot(),
-    'sessionSettings': {'mode': mode.name, ...settings.options},
-    if (transport case final value?) ...value.snapshot(),
-  };
+  Map<String, Object?> snapshot() {
+    final data = metrics.snapshot();
+    final events = data.remove('events');
+    return {
+      ...data,
+      'sessionSettings': {'mode': mode.name, ...settings.options},
+      if (transport case final value?) ...value.snapshot(),
+      'events': events,
+    };
+  }
 
-  static String diagnosticReport() =>
-      const JsonEncoder.withIndent('  ').convert({
-        'selectedSettings': {
-          'mode': selectedSettings.mode.name,
-          ...selectedSettings.options,
-        },
-        'current': current?.snapshot(),
-        'recent': recent,
-        'units': 'bytes; rates are 5-second averages of observed HTTP body bytes and loopback socket delivery, not decoded media or full wire traffic',
-      });
+  static Map<String, Object?> diagnosticSnapshot() => BtrDiagnostics.report(
+    selectedSettings: {
+      'mode': selectedSettings.mode.name,
+      ...selectedSettings.options,
+    },
+    current: current?.snapshot(),
+    recent: recent,
+  );
+
+  static String diagnosticReport() => BtrDiagnostics.full(diagnosticSnapshot());
+
+  static String compactDiagnosticReport() =>
+      BtrDiagnostics.compact(diagnosticSnapshot());
 
   Future<void> close() => _taskScope.close();
 
