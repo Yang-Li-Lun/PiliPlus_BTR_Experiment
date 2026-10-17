@@ -508,9 +508,7 @@ class BtrTrack {
     // Only unconsumed speculation is revocable. The head being awaited or
     // written is outside this queue and remains valid, even across a seek.
     void rebalance() {
-      if ((!demand.backpressured && !_hasNewerGet(demand)) ||
-          queue.isEmpty ||
-          reclaiming != null) {
+      if (!_hasNewerGet(demand) || queue.isEmpty || reclaiming != null) {
         return;
       }
       // Reclaiming is not permission to forget a validation contradiction

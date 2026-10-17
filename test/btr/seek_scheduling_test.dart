@@ -5,6 +5,7 @@ import 'dart:typed_data';
 
 import 'package:PiliPlus/services/btr/metrics.dart';
 import 'package:PiliPlus/services/btr/policy.dart';
+import 'package:PiliPlus/services/btr/proxy_capacity.dart';
 import 'package:PiliPlus/services/btr/scheduler.dart';
 import 'package:PiliPlus/services/btr/transport.dart';
 import 'package:matcher/expect.dart';
@@ -51,6 +52,52 @@ void main() {
   tearDown(() async {
     await transport.close();
     await cdn.close();
+  });
+
+  test('a sole briefly blocked reader keeps its completed prefetch', () async {
+    await setup(const Duration(seconds: 5));
+    transport.adaptive.connectionBps = 100 * 1024 * 1024;
+    final capacity = BtrProxyCapacity(), token = BtrCancel();
+    final slot = capacity.admit()!;
+    await slot.acquire(token);
+    final entered = Completer<void>(),
+        release = Completer<void>(),
+        done = Completer<void>();
+    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    server.listen((request) async {
+      try {
+        await transport.tracks['video']!.serve(
+          GatedRequest(request, entered, release),
+          slot: slot,
+        );
+      } finally {
+        slot.close();
+        done.complete();
+      }
+    });
+    final before = metrics.networkBytes;
+    final reading = fetchLocal(
+      'http://127.0.0.1:${server.port}/sole',
+      range: 'bytes=65536-3211263',
+    );
+    try {
+      await entered.future;
+      await waitUntil(() => capacity.suspensions > 0);
+      expect(
+        metrics.events.where((e) => e['event'] == 'prefetch-reclaimed'),
+        isEmpty,
+        reason: 'a short consumer pause with no competitor must not discard useful prefetch',
+      );
+      release.complete();
+      expect(await reading, orderedEquals(bytes.sublist(65536, 3211264)));
+      await done.future;
+      expect(metrics.networkBytes - before, 3211264 - 65536);
+    } finally {
+      if (!release.isCompleted) release.complete();
+      await reading;
+      await done.future;
+      await server.close(force: true);
+    }
   });
 
   test('progress above continuous playback demand does not hedge a burst-speed estimate', () async {
