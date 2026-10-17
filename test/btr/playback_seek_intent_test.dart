@@ -6,6 +6,38 @@ import 'package:test_api/scaffolding.dart';
 
 void main() {
   test(
+    'BTR confirms two advancing target samples, not a load reset or EOF clock',
+    () async {
+      final intent = PlaybackSeekIntent()..reset(playing: true);
+      await intent.seek(
+        completed: false,
+        target: const Duration(seconds: 40),
+        perform: (_) async {},
+        resume: () async {},
+      );
+      intent
+        ..position(Duration.zero, requireProgress: true)
+        ..position(const Duration(seconds: 40), requireProgress: true);
+      expect(intent.pendingTarget, const Duration(seconds: 40));
+      intent.position(
+        const Duration(milliseconds: 40100),
+        requireProgress: true,
+        advancing: false,
+      );
+      expect(intent.pendingTarget, isNotNull);
+      intent.position(
+        const Duration(seconds: 120),
+        requireProgress: true,
+        advancing: false,
+      );
+      expect(intent.acceptCompleted(const Duration(seconds: 120)), false);
+      intent
+        ..position(const Duration(seconds: 40), requireProgress: true)
+        ..position(const Duration(milliseconds: 40100), requireProgress: true);
+      expect(intent.pendingTarget, isNull);
+    },
+  );
+  test(
     'end target accepts completion while a backward target rejects stale EOF',
     () async {
       final intent = PlaybackSeekIntent();

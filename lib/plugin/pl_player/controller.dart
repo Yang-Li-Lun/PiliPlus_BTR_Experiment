@@ -1,4 +1,4 @@
-import 'dart:async' show Completer, StreamSubscription, Timer;
+import 'dart:async' show Completer, StreamSubscription, Timer, unawaited;
 import 'dart:convert' show ascii, utf8;
 import 'dart:io' show Platform;
 import 'dart:math' show max, min;
@@ -1331,7 +1331,52 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
       'durationMs': player.state.duration.inMilliseconds,
     });
     if (session.readRecovery.failed) _scheduleBtrReadRecovery(session);
+    if (_seekIntent.pendingTarget != null) {
+      unawaited(_recoverBtrSeekEof(player));
+    }
     return false;
+  }
+
+  Future<void> _recoverBtrSeekEof(Player player) async {
+    final session = _btrPlayback;
+    final revision = _seekIntent.seekRevision;
+    final generation = _btrOpenGeneration;
+    final target = _seekIntent.pendingTarget;
+    if (session?.transport == null || target == null) return;
+    bool eligible() =>
+        !_taskScope.closed &&
+        generation == _btrOpenGeneration &&
+        revision == _seekIntent.seekRevision &&
+        identical(player, _videoPlayerController) &&
+        identical(session, _btrPlayback) &&
+        (_btrSourceIsCurrent?.call() ?? true) &&
+        _seekIntent.playRequested &&
+        _seekIntent.pendingTarget == target &&
+        _btrFailedGeneration != generation;
+    try {
+      await _sourceSequence.runCurrent((isCurrent) async {
+        // A command reply is not a playback-restart barrier. Handle an EOF
+        // that arrived AFTER it with one real seek to the still-pending target.
+        // Classified read failures keep their existing bounded recovery path.
+        if (!isCurrent() ||
+            !eligible() ||
+            !player.state.completed ||
+            session!.readRecovery.failed ||
+            session.transport!.currentReadFailureAt != null ||
+            !_seekIntent.claimEofRecovery(revision)) {
+          return;
+        }
+        session.metrics.event('seek-eof-correction', {
+          'targetMs': target.inMilliseconds,
+          'seekRevision': revision,
+        });
+        await player.seek(target);
+        if (!isCurrent() || !eligible()) return;
+        await _resumeAfterSeek(player);
+      });
+    } catch (_) {
+      session!.metrics.seekCommand('failed', target.inMilliseconds);
+    }
   }
 
   // 开始播放
@@ -1461,7 +1506,16 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
       /// position
       stream.position.listen((Duration position) {
         final wasSeeking = _seekIntent.pendingTarget != null;
-        _seekIntent.position(position);
+        final btrSeek = _btrPlayback?.transport != null;
+        _seekIntent.position(
+          position,
+          requireProgress: btrSeek,
+          advancing:
+              !btrSeek ||
+              (player.state.playing &&
+                  !player.state.buffering &&
+                  !player.state.completed),
+        );
         _btrPlayback?.readRecovery.position(
           position,
           advancing:
@@ -1616,6 +1670,11 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
     try {
       final current = await _seekIntent.seek(
         completed: completed,
+        // keep-open can pause during the command, after the captured EOF flag.
+        // Original mode retains its existing seek/resume behavior.
+        needsResume: session?.transport == null
+            ? null
+            : () => !player.state.playing || player.state.completed,
         target: position,
         serialize: (operation) =>
             _sourceSequence.runCurrent((_) => operation()),

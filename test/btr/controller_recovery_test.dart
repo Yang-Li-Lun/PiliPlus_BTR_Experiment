@@ -64,6 +64,7 @@ void main() {
     final handlers = [
       'bool _handleBtrNativeError(',
       'bool _acceptBtrCompleted(',
+      'Future<void> _recoverBtrSeekEof(',
       'void _checkBtrReadStall(',
       'Future<void> _stopTerminalBtr(',
     ].where(source.contains).map((marker) => method(source, marker)).join('\n');
@@ -122,11 +123,19 @@ class Player {
   }
   bool isPlayingStateChangeAllowed = false, lateEof = true, failSeek = false, lateOpenEof = false;
   Completer<void>? stopping;
+  bool eofDuringSeek = false;
+  Future<void> Function()? onSeek;
   Future<void> Function()? onOpen;
   Future<void> seek(Duration p) async {
     calls.add('seek:\${p.inSeconds}');
     if (failSeek) throw StateError('secret URL');
+    await onSeek?.call();
     state.position = p;
+    if (eofDuringSeek) {
+      state.playing = false;
+      state.completed = true;
+      completedController.add(true);
+    }
     state.completed = false;
     if (lateEof) state.completed = true;
   }
@@ -211,6 +220,84 @@ Future<void> main() async {
     check(c._videoPlayerController!.state.position.inSeconds == 40, 'target lost');
     check(!c._videoPlayerController!.calls.contains('replay:0'), 'replayed zero');
     check(c._videoPlayerController!.state.playing, 'did not resume');
+  });
+  await scenario('EOF arriving during a playing seek restores native play intent', () async {
+    final c = Subject()..wire(); final p = c._videoPlayerController!;
+    p.state..playing = true..completed = false;
+    p.eofDuringSeek = true;
+    await c.seek(const Duration(seconds: 40));
+    await Future<void>.delayed(Duration.zero);
+    check(p.state.playing, 'EOF during command left native playback paused');
+    check(p.state.position.inSeconds == 40, 'requested target lost');
+    check(p.calls.where((s) => s.startsWith('seek:')).length == 1, 'in-flight EOF caused a redundant re-seek');
+    check(!p.calls.any((s) => s == 'stop' || s.startsWith('open:') || s == 'replay:0'), 'seek forced a reload/replay');
+  });
+  await scenario('late EOF after command re-seeks target once without reopening', () async {
+    final c = Subject()..wire(); final p = c._videoPlayerController!;
+    p.lateEof = false; p.state..playing = true..completed = false;
+    await c.seek(const Duration(seconds: 40));
+    p.state..position = p.state.duration..playing = false..completed = true;
+    p.completedController.add(true);
+    await Future<void>.delayed(const Duration(milliseconds: 10));
+    check(p.state.position.inSeconds == 40 && p.state.playing, 'late EOF never restored target/playback');
+    check(p.calls.where((s) => s == 'seek:40').length == 2, 'expected one bounded native re-seek');
+    check(!p.calls.any((s) => s == 'stop' || s.startsWith('open:') || s == 'replay:0'), 'late EOF used reload/replay');
+    p.state..playing = false..completed = true;
+    p.completedController.add(true);
+    await Future<void>.delayed(const Duration(milliseconds: 10));
+    check(p.calls.where((s) => s.startsWith('seek:')).length == 2, 'unbounded EOF re-seek');
+  });
+  await scenario('queued EOF correction yields to new seek pause source and task close', () async {
+    for (final action in ['seek', 'pause', 'source', 'close']) {
+      final c = Subject()..wire(); final p = c._videoPlayerController!;
+      p.lateEof = false;
+      await c.seek(const Duration(seconds: 40));
+      final held = Completer<void>();
+      final owner = c._sourceSequence.runCurrent((_) => held.future);
+      p.state..playing = false..completed = true;
+      p.completedController.add(true);
+      Future<void>? newer;
+      if (action == 'seek') newer = c.seek(const Duration(seconds: 60));
+      if (action == 'pause') c._seekIntent.requestPlaying(false);
+      if (action == 'source') newer = c._sourceSequence.run((_) async {});
+      if (action == 'close') c._taskScope.closed = true;
+      held.complete(); await owner; await newer;
+      await Future<void>.delayed(Duration.zero);
+      check(p.calls.where((s) => s == 'seek:40').length == 1, 'stale EOF correction ran after \$action');
+      if (action == 'pause') check(!p.state.playing, 'EOF overrode pause');
+    }
+  });
+  await scenario('pause or new seek during native EOF correction owns final playback', () async {
+    for (final pause in [true, false]) {
+      final c = Subject()..wire(); final p = c._videoPlayerController!;
+      p.lateEof = false; await c.seek(const Duration(seconds: 40));
+      final entered = Completer<void>(), gate = Completer<void>();
+      p.onSeek = () async { if (!entered.isCompleted) entered.complete(); await gate.future; };
+      p.state..completed = true..playing = false;
+      p.completedController.add(true); await entered.future;
+      Future<void>? newer;
+      if (pause) { c._seekIntent.requestPlaying(false); } else { newer = c.seek(const Duration(seconds: 60)); }
+      gate.complete(); await newer; await Future<void>.delayed(Duration.zero);
+      if (pause) check(!p.state.playing, 'correction overrode in-flight pause');
+      else check(p.state.position.inSeconds == 60, 'correction overwrote newest target');
+    }
+  });
+  await scenario('classified read failure does not also spend native EOF correction', () async {
+    final c = Subject()..wire(); final p = c._videoPlayerController!;
+    p.lateEof = false; await c.seek(const Duration(seconds: 40));
+    c._btrPlayback!.readRecovery.record('ffurl_read returned -1', const Duration(seconds: 40));
+    p.state.completed = true; p.completedController.add(true);
+    await Future<void>.delayed(Duration.zero); c._retryTimer?.cancel();
+    check(p.calls.where((s) => s.startsWith('seek:')).length == 1, 'read failure triggered both correction paths');
+  });
+  await scenario('original mode receives no new mid-seek EOF recovery', () async {
+    final c = Subject()..wire(); final p = c._videoPlayerController!;
+    c._btrPlayback = null;
+    p.state..playing = true..completed = false;
+    p.eofDuringSeek = true; await c.seek(const Duration(seconds: 40));
+    await Future<void>.delayed(Duration.zero);
+    check(!p.state.playing, 'BTR resume change leaked into original mode');
+    check(p.calls.where((s) => s.startsWith('seek:')).length == 1, 'BTR correction leaked into original mode');
   });
   await scenario('queued burst coalesces before native dispatch', () async {
     final c = Subject(); final held = Completer<void>();

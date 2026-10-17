@@ -42,10 +42,13 @@ class _Demand {
 }
 
 class _QueuedPiece {
-  _QueuedPiece(this.range, this.token, this.result);
+  _QueuedPiece(this.range, this.token, this.result) {
+    result.then((value) => completed = value);
+  }
   final BtrRange range;
   final BtrCancel token;
   final Future<_PieceResult> result;
+  _PieceResult? completed;
 }
 
 // Only transport interruptions may be retried. Protocol/identity violations and
@@ -100,7 +103,9 @@ class BtrTrack {
   bool _hasNewerGet(_Demand demand) => _demands.any(
     (other) =>
         other.mediaGet &&
-        other.generation > demand.generation &&
+        // Native retries and demuxer reads can overlap within ONE seek too.
+        // Request order, not only explicit seek generation, ranks live demand.
+        other.id > demand.id &&
         !other.token.cancelled,
   );
   final health = <String, Map<String, Object>>{};
@@ -470,8 +475,38 @@ class BtrTrack {
     // written is outside this queue and remains valid, even across a seek.
     void rebalance() {
       if (!_hasNewerGet(demand) || queue.isEmpty || reclaiming != null) return;
+      // Reclaiming is not permission to forget a validation contradiction
+      // already observed in an out-of-order piece behind a blocked head.
+      for (final entry in queue) {
+        final error = entry.completed?.error;
+        if (error != null && error is! BtrCancelled && !_recoverable(error)) {
+          terminal = true;
+          lastFailure = _failureCode(error);
+          if (!_terminalRecorded) metrics.terminalFailures++;
+          _terminalRecorded = true;
+          metrics.event('transfer-ended', {
+            'track': spec.kind,
+            'request': demand.id,
+            'stage': 'prefetch-reclaim',
+            'reason': lastFailure!,
+            'terminal': true,
+          });
+          for (final other in _demands) {
+            _cancelDemand(other, 'track-terminal');
+          }
+          return;
+        }
+      }
+      // Keep one already validated contiguous piece for the still-active old
+      // consumer. It uses no connection and remains inside the shared window.
+      // Cancel the remaining suffix to make room for the newer reader.
+      final retained = queue.first.completed?.bytes != null
+          ? queue.removeFirst()
+          : null;
       final removed = queue.toList();
       queue.clear();
+      if (retained != null) queue.add(retained);
+      if (removed.isEmpty) return;
       cursor = removed.first.range.start;
       for (final entry in removed) {
         entry.token.cancel();
@@ -481,6 +516,7 @@ class BtrTrack {
         'request': demand.id,
         'generation': demand.generation,
         'pieces': removed.length,
+        'retainedBytes': retained?.range.length ?? 0,
       });
       reclaiming = () async {
         await Future.wait(removed.map((entry) => entry.result));
@@ -496,6 +532,12 @@ class BtrTrack {
     void fill() {
       if (reclaiming != null) return;
       final older = _hasNewerGet(demand);
+      final sharing = _demands.any(
+        (other) =>
+            other.mediaGet &&
+            !identical(other, demand) &&
+            !other.token.cancelled,
+      );
       // Keep distant speculative data bounded even if the head stalls.
       while (cursor <= range.end &&
           queue.length < (older ? 1 : math.max(1, owner.scheduler.limit - 2))) {
@@ -503,8 +545,11 @@ class BtrTrack {
         final size = needsHead ? headBytes : adaptive.pieceSize;
         final end = math.min(cursor + size - 1, range.end);
         final piece = BtrRange(cursor, end);
-        // Share the original per-track memory cap across overlapping demands.
-        final limit = needsHead ? window : speculativeLimit;
+        // A lone reader can use the original full window. Every actual new
+        // GET now reclaims old speculation (including same-generation reads)
+        // before waiting for capacity, keeping its head reachable. Overlap
+        // still reserves head space within the shared 4 MiB cap.
+        final limit = needsHead || !sharing ? window : speculativeLimit;
         if (_reservedBytes + piece.length > limit) break;
         final offset = cursor;
         final pieceToken = BtrCancel();

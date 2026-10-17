@@ -9,6 +9,7 @@ class PlaybackSeekIntent {
   Duration? _target;
   Duration? _lastPosition;
   bool _commandCompleted = false;
+  bool _eofRetried = false;
   Duration? get pendingTarget => _target;
   int get seekRevision => _seekRevision;
   bool get playRequested => _playRequested;
@@ -22,6 +23,14 @@ class PlaybackSeekIntent {
 
   bool isCurrent(int revision) => revision == _intentRevision;
 
+  /// One native EOF correction per explicit seek, never an automatic loop.
+  bool claimEofRecovery(int revision) {
+    if (revision != _seekRevision || _target == null || _eofRetried) {
+      return false;
+    }
+    return _eofRetried = true;
+  }
+
   void reset({bool playing = false}) {
     requestPlaying(playing);
     _seekRevision++;
@@ -30,12 +39,18 @@ class PlaybackSeekIntent {
     _commandCompleted = false;
   }
 
-  void position(Duration position) {
+  void position(
+    Duration position, {
+    bool advancing = true,
+    bool requireProgress = false,
+  }) {
     final previous = _lastPosition;
-    _lastPosition = position;
+    _lastPosition = advancing ? position : null;
     if (_commandCompleted &&
         _target != null &&
         previous != null &&
+        (!requireProgress ||
+            (advancing && (previous - _target!).inMilliseconds.abs() < 2500)) &&
         position > previous &&
         (position - _target!).inMilliseconds.abs() < 2500) {
       _target = null;
@@ -56,6 +71,7 @@ class PlaybackSeekIntent {
     required bool completed,
     required Future<void> Function(bool Function() isCurrent) perform,
     required Future<void> Function() resume,
+    bool Function()? needsResume,
     bool Function()? isCurrentSource,
     Duration? target,
     Future<void> Function(Future<void> Function())? serialize,
@@ -64,6 +80,7 @@ class PlaybackSeekIntent {
     _target = target;
     _lastPosition = null;
     _commandCompleted = false;
+    _eofRetried = false;
     final intentRevision = _intentRevision;
     bool isCurrentSeek() =>
         revision == _seekRevision && (isCurrentSource?.call() ?? true);
@@ -79,7 +96,7 @@ class PlaybackSeekIntent {
       _lastPosition = null;
       // Carry pending EOF intent across coalesced seeks, including a seek
       // queued after the first native command has cleared completed.
-      if (_resumePending &&
+      if ((_resumePending || (needsResume?.call() ?? false)) &&
           _playRequested &&
           intentRevision == _intentRevision) {
         _resumePending = false;
