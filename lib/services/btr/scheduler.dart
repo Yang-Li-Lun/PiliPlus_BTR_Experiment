@@ -169,6 +169,14 @@ class BtrAdaptive {
   double ahead = 0;
   bool playing = false;
   bool buffering = false;
+  double? durationSeconds;
+
+  double? requiredBps(int total) {
+    final seconds = durationSeconds;
+    return seconds != null && seconds.isFinite && seconds > 0 && total > 0
+        ? total / seconds
+        : null;
+  }
 
   double get throughput {
     final at = now();

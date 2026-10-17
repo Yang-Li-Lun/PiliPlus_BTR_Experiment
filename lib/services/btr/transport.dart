@@ -9,6 +9,7 @@ import 'dart:typed_data';
 import 'package:PiliPlus/services/btr/metrics.dart';
 import 'package:PiliPlus/services/btr/network.dart';
 import 'package:PiliPlus/services/btr/policy.dart';
+import 'package:PiliPlus/services/btr/proxy_capacity.dart';
 import 'package:PiliPlus/services/btr/scheduler.dart';
 import 'package:PiliPlus/services/btr/settings.dart';
 
@@ -19,8 +20,9 @@ class _PieceResult {
 }
 
 class _Attempt {
-  _Attempt(this.data, this.received);
+  _Attempt(this.data, this.received) : prefix = received;
   final Uint8List data;
+  final int prefix;
   int received;
   bool validated = false;
   int started = 0;
@@ -37,6 +39,7 @@ class _Demand {
   final token = BtrCancel();
   String? cancellation;
   bool mediaGet = false;
+  bool backpressured = false;
   void Function()? rebalance;
   int reservedBytes = 0;
 }
@@ -213,10 +216,18 @@ class BtrTrack {
     changed?.complete();
   }
 
-  Future<void> serve(HttpRequest request) async {
+  Future<void> serve(
+    HttpRequest request, {
+    BtrProxySlot? slot,
+    int? generation,
+  }) async {
     if (terminal) throw const BtrFailure('track-ended');
     lifetime.check();
-    final demand = _Demand(++_nextDemand, owner._seekGeneration, metrics.now());
+    final demand = _Demand(
+      ++_nextDemand,
+      generation ?? owner._seekGeneration,
+      metrics.now(),
+    );
     final token = demand.token;
     _demands.add(demand);
     final isHead = request.method == 'HEAD';
@@ -304,9 +315,29 @@ class BtrTrack {
           demand.stage = stage;
           sent = true;
           response.add(bytes);
-          await token.bind(
-            response.flush().timeout(const Duration(seconds: 15)),
-          );
+          if (slot == null) {
+            await token.bind(
+              response.flush().timeout(const Duration(seconds: 15)),
+            );
+          } else {
+            try {
+              await slot.flush(
+                response.flush(),
+                token,
+                onBlocked: () {
+                  demand.backpressured = true;
+                  demand.rebalance?.call();
+                  metrics.event('proxy-writer-parked', {
+                    'track': spec.kind,
+                    'request': demand.id,
+                    'generation': demand.generation,
+                  });
+                },
+              );
+            } finally {
+              demand.backpressured = false;
+            }
+          }
           // Successfully handed to the loopback socket; not decoded-frame evidence.
           metrics.delivered(spec.kind, bytes.length);
           adaptive.delivered(bytes.length);
@@ -316,6 +347,9 @@ class BtrTrack {
             ..stage = stage
             ..deliveredBytes = delivered
             ..progressAt = metrics.now();
+          // Account for the completed socket flush before waiting to resume
+          // production. A lent slot is reacquired before another piece/read.
+          await slot?.acquire(token);
         }
       }
       token.check();
@@ -462,7 +496,7 @@ class BtrTrack {
     // Never let speculative data for a stalled consumer occupy the head slots
     // of the other admissible handlers. Their GETs remain valid and independent.
     const speculativeLimit =
-        window - (BtrTransport.handlerLimit - 1) * headBytes;
+        window - (BtrProxyCapacity.responseLimit - 1) * headBytes;
     final scope = BtrCancel();
     final unlink = token.listen(scope.cancel);
     final jobs = <Future<void>>{};
@@ -474,7 +508,11 @@ class BtrTrack {
     // Only unconsumed speculation is revocable. The head being awaited or
     // written is outside this queue and remains valid, even across a seek.
     void rebalance() {
-      if (!_hasNewerGet(demand) || queue.isEmpty || reclaiming != null) return;
+      if ((!demand.backpressured && !_hasNewerGet(demand)) ||
+          queue.isEmpty ||
+          reclaiming != null) {
+        return;
+      }
       // Reclaiming is not permission to forget a validation contradiction
       // already observed in an out-of-order piece behind a blocked head.
       for (final entry in queue) {
@@ -716,11 +754,14 @@ class BtrTrack {
           final now = DateTime.now().millisecondsSinceEpoch;
           final delay = adaptive.hedgeMs;
           if (now - main.started < delay) return;
-          final rate = main.received * 1000 / math.max(1, now - main.started);
+          final rate =
+              (main.received - main.prefix) *
+              1000 /
+              math.max(1, now - main.started);
+          final needed = adaptive.requiredBps(sample!.identity.total);
           if (now - main.progress < delay &&
               main.received > 0 &&
-              (adaptive.connectionBps == 0 ||
-                  rate >= adaptive.connectionBps * .6)) {
+              (needed == null || rate >= needed)) {
             return;
           }
           hedgeStarted = true;
@@ -906,7 +947,7 @@ class BtrTrack {
 }
 
 class BtrTransport {
-  static const handlerLimit = 4;
+  static const handlerLimit = BtrProxyCapacity.activeLimit;
   BtrTransport({
     required this.mode,
     required this.metrics,
@@ -934,8 +975,8 @@ class BtrTransport {
   late final BtrAdaptive adaptive;
   final tracks = <String, BtrTrack>{};
   final _handlers = <Future<void>>{};
-  int _activeHandlers = 0;
-  int _peakHandlers = 0;
+  final _capacity = BtrProxyCapacity();
+  final _admissions = <BtrCancel>{};
   int _capacityRejections = 0;
   int _invalidRejections = 0;
   int _retirementRejections = 0;
@@ -1022,6 +1063,7 @@ class BtrTransport {
   }
 
   Future<void> _handle(HttpRequest r) async {
+    final generation = _seekGeneration;
     final parts = r.uri.pathSegments;
     final valid =
         !_closed &&
@@ -1034,13 +1076,15 @@ class BtrTransport {
         parts[0] == _capability &&
         tracks.containsKey(parts[1]) &&
         (r.method == 'GET' || r.method == 'HEAD');
-    if (!valid || _retiring || _activeHandlers >= handlerLimit) {
+    BtrProxySlot? slot;
+    if (valid && !_retiring) slot = _capacity.admit();
+    if (!valid || _retiring || slot == null) {
       if (valid && _retiring) {
         _retirementRejections++;
       } else if (valid) {
         _capacityRejections++;
-        _localFailureGeneration = _seekGeneration;
-        _readFailure(_seekGeneration, 'handler-capacity');
+        _localFailureGeneration = generation;
+        _readFailure(generation, 'handler-capacity');
       } else {
         _invalidRejections++;
       }
@@ -1051,8 +1095,8 @@ class BtrTransport {
             : _retiring
             ? 'player-stopped'
             : 'handler-capacity',
-        'activeHandlers': _activeHandlers,
-        'generation': _seekGeneration,
+        'activeHandlers': _capacity.active,
+        'generation': generation,
         if (valid) 'track': parts[1],
       });
       r.response.statusCode = valid ? 503 : 403;
@@ -1060,10 +1104,31 @@ class BtrTransport {
       await r.response.close().timeout(const Duration(seconds: 2));
       return;
     }
-    _activeHandlers++;
-    _peakHandlers = math.max(_peakHandlers, _activeHandlers);
+    final admission = BtrCancel();
+    _admissions.add(admission);
     try {
-      await tracks[parts[1]]!.serve(r);
+      try {
+        await slot.acquire(admission).timeout(const Duration(seconds: 2));
+      } on TimeoutException {
+        admission.cancel();
+        _capacityRejections++;
+        if (generation == _seekGeneration) _localFailureGeneration = generation;
+        _readFailure(generation, 'handler-capacity');
+        metrics.event('proxy-rejected', {
+          'status': 503,
+          'reason': 'handler-capacity',
+          'activeHandlers': _capacity.active,
+          'generation': generation,
+          'track': parts[1],
+        });
+        r.response.statusCode = 503;
+        r.response.contentLength = 0;
+        await r.response.close().timeout(const Duration(seconds: 2));
+        return;
+      }
+      if (_retiring || _closed) throw const BtrCancelled();
+      _admissions.remove(admission);
+      await tracks[parts[1]]!.serve(r, slot: slot, generation: generation);
     } catch (_) {
       try {
         r.response.statusCode = 502;
@@ -1073,7 +1138,9 @@ class BtrTransport {
         /* disconnected */
       }
     } finally {
-      _activeHandlers--;
+      admission.cancel();
+      _admissions.remove(admission);
+      slot.close();
     }
   }
 
@@ -1083,6 +1150,9 @@ class BtrTransport {
   Future<void> retirePlayerRequests() async {
     _retiring = true;
     try {
+      for (final admission in _admissions.toList()) {
+        admission.cancel();
+      }
       for (final track in tracks.values) {
         for (final demand in track._demands) {
           track._cancelDemand(demand, 'player-stopped');
@@ -1103,9 +1173,15 @@ class BtrTransport {
   }
 
   Map<String, Object?> snapshot() => {
-    'activeProxyHandlers': _activeHandlers,
-    'peakProxyHandlers': _peakHandlers,
+    'activeProxyHandlers': _capacity.active,
+    'peakProxyHandlers': _capacity.peak,
     'proxyHandlerLimit': handlerLimit,
+    'openProxyResponses': _capacity.responses,
+    'proxyResponseLimit': BtrProxyCapacity.responseLimit,
+    'parkedProxyWriters': _capacity.parked,
+    'waitingProxyResponses':
+        _capacity.responses - _capacity.active - _capacity.parked,
+    'proxyWriterSuspensions': _capacity.suspensions,
     'proxyCapacityRejections': _capacityRejections,
     'proxyInvalidRejections': _invalidRejections,
     'proxyRetirementRejections': _retirementRejections,
@@ -1137,6 +1213,10 @@ class BtrTransport {
           (t) => {
             'kind': t.spec.kind,
             'host': t.sample?.identity.uri.host,
+            'totalBytes': t.sample?.identity.total,
+            'estimatedAverageRequiredBps': t.sample == null
+                ? null
+                : adaptive.requiredBps(t.sample!.identity.total),
             'selection': t.selectionState,
             'lastFailure': t.lastFailure,
             'identity': t.sample == null
@@ -1153,6 +1233,7 @@ class BtrTransport {
                   'request': d.id,
                   'generation': d.generation,
                   'stage': d.stage,
+                  'backpressured': d.backpressured,
                   'ageMs': metrics.now() - d.startedAt,
                   'progressAgeMs': metrics.now() - d.progressAt,
                   'deliveredBytes': d.deliveredBytes,
@@ -1178,6 +1259,9 @@ class BtrTransport {
   }
 
   Future<void> _closeResources() async {
+    for (final admission in _admissions.toList()) {
+      admission.cancel();
+    }
     final cleanup = tracks.values.map((t) => t.close()).toList();
     network.close();
     await _server?.close(force: true);

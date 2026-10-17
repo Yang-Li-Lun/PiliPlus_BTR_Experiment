@@ -1018,10 +1018,17 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
     }
     try {
       session?.metrics.playerOpening('source', seekTo?.inMilliseconds ?? 0);
+      final historyRevision =
+          session?.transport != null &&
+              seekTo != null &&
+              _seekIntent.pendingTarget == null
+          ? _seekIntent.beginSource(seekTo)
+          : null;
       await player.open(
         Media(video, start: seekTo, extras: extras.isEmpty ? null : extras),
         play: false,
       );
+      if (historyRevision != null) _seekIntent.sourceOpened(historyRevision);
       return isCurrent() &&
           generation == _btrOpenGeneration &&
           _btrFailedGeneration != generation &&
@@ -1330,7 +1337,10 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
       'positionMs': player.state.position.inMilliseconds,
       'durationMs': player.state.duration.inMilliseconds,
     });
-    if (session.readRecovery.failed) _scheduleBtrReadRecovery(session);
+    if (session.readRecovery.failed ||
+        session.transport!.currentSeekHasLocalFailure) {
+      _scheduleBtrReadRecovery(session);
+    }
     if (_seekIntent.pendingTarget != null) {
       unawaited(_recoverBtrSeekEof(player));
     }
@@ -1835,6 +1845,9 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
       return;
     }
     if (_btrPlayback?.readRecovery.abnormalCompleted == true) {
+      // An EOF correction is queued behind this source open. Awaiting a
+      // second open here would wait on our own source operation.
+      if (_processing && _seekIntent.pendingTarget != null) return;
       await refreshPlayer();
       return;
     }

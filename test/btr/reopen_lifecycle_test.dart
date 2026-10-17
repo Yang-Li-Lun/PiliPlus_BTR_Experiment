@@ -13,9 +13,9 @@ import 'fake_cdn.dart';
 import 'demand_lifecycle_test.dart' show waitUntil;
 
 void main() {
-  for (final oldCount in [1, 3]) {
+  for (final oldCount in [1, 3, 4]) {
     test(
-      '$oldCount blocked old writers cannot starve a new range before handler capacity',
+      '$oldCount blocked old writers admit a new range and preserve old responses',
       () async {
         final bytes = Uint8List.fromList(
           List.generate(16 * 1024 * 1024, (i) => i % 251),
@@ -49,7 +49,7 @@ void main() {
           final socket = await Socket.connect(uri.host, uri.port);
           sockets.add(socket);
           socket.write(
-            'GET ${uri.path} HTTP/1.1\r\nHost: ${uri.host}:${uri.port}\r\nRange: bytes=0-\r\n\r\n',
+            'GET ${uri.path} HTTP/1.1\r\nHost: ${uri.host}:${uri.port}\r\nRange: bytes=0-\r\nConnection: close\r\n\r\n',
           );
           await socket.flush();
         }
@@ -72,7 +72,8 @@ void main() {
         expect(transport.snapshot()['proxyCapacityRejections'], 0);
         expect(metrics.cancellations, 0);
         expect(
-          transport.snapshot()['activeProxyHandlers'],
+          transport.snapshot()['openProxyResponses'] ??
+              transport.snapshot()['activeProxyHandlers'],
           lessThanOrEqualTo(oldCount + 1),
         );
         expect(
@@ -83,6 +84,42 @@ void main() {
           (transport.snapshot()['tracks'] as List).single['activeDemands'],
           greaterThanOrEqualTo(oldCount),
         );
+        if (oldCount == 4) {
+          // Resume every still-valid reader: suspending must not truncate,
+          // duplicate, reorder or replace its already-sent bytes.
+          final responses = await Future.wait(
+            sockets.map(
+              (socket) => socket.fold<BytesBuilder>(
+                BytesBuilder(copy: false),
+                (out, data) => out..add(data),
+              ),
+            ),
+          ).timeout(const Duration(seconds: 10));
+          for (final raw in responses) {
+            final wire = raw.takeBytes();
+            var split = -1;
+            for (var i = 0; i + 3 < wire.length; i++) {
+              if (wire[i] == 13 &&
+                  wire[i + 1] == 10 &&
+                  wire[i + 2] == 13 &&
+                  wire[i + 3] == 10) {
+                split = i + 4;
+                break;
+              }
+            }
+            expect(split, greaterThan(0));
+            expect(wire.sublist(split), orderedEquals(bytes));
+          }
+          expect(metrics.cancellations, 0);
+          expect(
+            transport.snapshot()['peakProxyHandlers'],
+            lessThanOrEqualTo(4),
+          );
+          expect(
+            transport.snapshot()['proxyWriterSuspensions'],
+            greaterThan(0),
+          );
+        }
       },
     );
   }
@@ -96,7 +133,12 @@ void main() {
       mode: BtrMode.combined,
       metrics: metrics,
       scheduler: scheduler,
-      network: FakeNetwork(scheduler, metrics, cdn),
+      network: FakeNetwork(
+        scheduler,
+        metrics,
+        cdn,
+        attemptTimeout: const Duration(seconds: 5),
+      ),
     );
     final sockets = <Socket>[];
     addTearDown(() async {
@@ -125,7 +167,9 @@ void main() {
     }
     await waitUntil(
       () =>
-          transport.snapshot()['activeProxyHandlers'] == 4 &&
+          (transport.snapshot()['openProxyResponses'] ??
+                  transport.snapshot()['activeProxyHandlers']) ==
+              4 &&
           (transport.snapshot()['tracks'] as List).every(
             (t) =>
                 (t['demands'] as List).length == 2 &&
@@ -164,7 +208,12 @@ void main() {
       mode: BtrMode.combined,
       metrics: metrics,
       scheduler: scheduler,
-      network: FakeNetwork(scheduler, metrics, cdn),
+      network: FakeNetwork(
+        scheduler,
+        metrics,
+        cdn,
+        attemptTimeout: const Duration(seconds: 5),
+      ),
     );
     final held = Completer<void>();
     addTearDown(() async {
@@ -215,6 +264,18 @@ void main() {
           .single['reason'],
       'handler-capacity',
     );
+    // The client can receive the 503 before the handler's finally releases
+    // its response ownership. Observe that release before admitting the next.
+    await waitUntil(() => transport.snapshot()['openProxyResponses'] == 4);
+    final staleAdmission = expectLater(
+      fetchLocal(urls['audio']!, range: 'bytes=-100'),
+      throwsA(isA<BtrFailure>().having((e) => e.status, 'status', 503)),
+    );
+    await waitUntil(() => transport.snapshot()['openProxyResponses'] == 5);
+    transport.seek();
+    await staleAdmission;
+    expect(transport.currentSeekHasLocalFailure, false);
+    expect(transport.currentReadFailureAt, isNull);
     // Deliberately held valid streams are not cancelled by seek/full capacity.
     expect(metrics.cancellations, 0);
     // Simulated native stop boundary: no old stream is an active consumer now.

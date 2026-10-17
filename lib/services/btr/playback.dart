@@ -5,6 +5,7 @@ import 'package:PiliPlus/http/browser_ua.dart';
 import 'package:PiliPlus/http/constants.dart';
 import 'package:PiliPlus/plugin/pl_player/models/data_source.dart';
 import 'package:PiliPlus/services/btr/diagnostics.dart';
+import 'package:PiliPlus/services/btr/buffer_ahead.dart';
 import 'package:PiliPlus/services/btr/metrics.dart';
 import 'package:PiliPlus/services/btr/policy.dart';
 import 'package:PiliPlus/services/btr/read_recovery.dart';
@@ -182,16 +183,22 @@ class BtrPlayback {
       onReadStall?.call();
       metrics.nativePlayerVolume = player.state.volume;
       if (transport != null) metrics.sampleNativeAv(player.getProperty);
-      metrics.bufferAheadSeconds = observedBuffer == null
+      metrics.bufferAheadSeconds = transport != null
+          ? BtrBufferAhead.read(
+              player.getProperty,
+              player.state.position.inMicroseconds / 1000000,
+            )
+          : observedBuffer == null
           ? null
           : ((observedBuffer! - player.state.position).inMilliseconds / 1000)
                 .clamp(0.0, double.infinity);
       transport?.adaptive.demand(
         playing: player.state.playing,
         buffering: player.state.buffering,
-        ahead:
-            (player.state.buffer - player.state.position).inMilliseconds / 1000,
+        ahead: metrics.bufferAheadSeconds ?? 0,
       );
+      transport?.adaptive.durationSeconds =
+          player.state.duration.inMicroseconds / 1000000;
       try {
         final bytes = int.tryParse(
           player.getProperty('demuxer-cache-state/total-bytes'),
@@ -217,6 +224,9 @@ class BtrPlayback {
     final events = data.remove('events');
     return {
       ...data,
+      'bufferAheadBasis': transport == null
+          ? 'native-cache-end-minus-position'
+          : 'main-demuxer-current-cached-range',
       'sessionSettings': {'mode': mode.name, ...settings.options},
       if (transport case final value?) ...value.snapshot(),
       'events': events,

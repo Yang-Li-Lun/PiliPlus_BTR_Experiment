@@ -31,6 +31,22 @@ class PlaybackSeekIntent {
     return _eofRetried = true;
   }
 
+  /// Media.start is also an unconfirmed seek. EOF/zero events during open
+  /// must not discard a history target before actual playback reaches it.
+  int beginSource(Duration target) {
+    _target = target;
+    _lastPosition = null;
+    _commandCompleted = false;
+    _eofRetried = false;
+    return ++_seekRevision;
+  }
+
+  void sourceOpened(int revision) {
+    if (revision != _seekRevision) return;
+    _commandCompleted = true;
+    _lastPosition = null;
+  }
+
   void reset({bool playing = false}) {
     requestPlaying(playing);
     _seekRevision++;

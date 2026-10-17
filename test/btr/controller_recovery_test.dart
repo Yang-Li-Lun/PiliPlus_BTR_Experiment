@@ -43,6 +43,14 @@ void main() {
           '${root.path}/lib/plugin/pl_player/controller.dart',
     ).readAsStringSync();
     final seek = method(source, 'Future<void> seek(');
+    final play = method(source, 'Future<void> play({');
+    final historyStart = source.indexOf(
+      "session?.metrics.playerOpening('source'",
+    );
+    final historyOpen = source.substring(
+      historyStart,
+      source.indexOf('return isCurrent()', historyStart),
+    );
     final refresh = method(source, 'Future<void>? refreshPlayer(');
     final resume = source.contains('Future<void> _resumeAfterSeek(')
         ? method(source, 'Future<void> _resumeAfterSeek(')
@@ -106,7 +114,7 @@ enum Status {completed, paused, playing; bool get isCompleted => this == complet
 class Value<T> { Value(this.value); T value; }
 class FileSource {}
 class Scope { bool closed = false; }
-class Media { Media(this.start); final Duration start; Media copyWith({required Duration start}) => Media(start); }
+class Media { Media(dynamic source, {Duration? start, dynamic extras}): start = start ?? (source is Duration ? source : Duration.zero); final Duration start; Media copyWith({required Duration start}) => Media(start); }
 class State { bool completed = true, playing = false, buffering = false; final playlist = <Object>[]; Duration position = Duration.zero, buffer = Duration.zero, duration = const Duration(seconds: 120); }
 class NativeLock { Future<T> synchronized<T>(Future<T> Function() work) => work(); }
 class Player {
@@ -203,7 +211,15 @@ class Subject {
   void _cancelSubForSeek() {}
   void _updatePlaybackState({Duration? position}) {}
   void _updateIOSPip(Duration position) {}
-  Future<void> play({bool hideControls = true}) => _videoPlayerController!.play();
+  int _playerCount = 1, _seekToRequest = 0;
+  bool controls = true;
+  Future<void> seekTo(Duration p, {bool isSeek = false}) => seek(p, isSeek: isSeek);
+  Future<void> historyOpen(Duration seekTo) async {
+    final session = _btrPlayback, player = _videoPlayerController!;
+    const video = 'fixture'; const extras = <String, String>{};
+    $historyOpen
+  }
+  $play
   $seek
   $refresh
   $resume
@@ -215,6 +231,36 @@ Future<void> main() async {
   Future<void> scenario(String name, Future<void> Function() run) async {
     try { await run(); print('PASS: \$name'); } catch (e) { failures.add(name); print('FAIL: \$name: \$e'); }
   }
+  await scenario('history open EOF corrects saved target after source ownership is released', () async {
+    final c = Subject()..wire(); final p = c._videoPlayerController!;
+    p.state.duration = const Duration(seconds: 4079); p.lateOpenEof = true;
+    p.onOpen = () async {
+      p.state..position = p.state.duration..completed = true..playing = false;
+      p.completedController.add(true);
+    };
+    await c._sourceSequence.runCurrent((_) async {
+      c._processing = true;
+      await c.historyOpen(const Duration(seconds: 3648));
+      await c.play();
+      c._processing = false;
+    }).timeout(const Duration(seconds: 1));
+    await Future<void>.delayed(const Duration(milliseconds: 20));
+    check(p.state.position.inSeconds == 3648 && p.state.playing, 'history EOF lost saved target');
+    check(!p.calls.contains('replay:0') && !p.calls.contains('stop'), 'history recovery replayed or reloaded');
+    await c.seek(const Duration(seconds: 600));
+    await c.seek(const Duration(seconds: 700));
+    check(p.state.position.inSeconds == 700, 'post-history seeks lost latest target');
+  });
+  await scenario('late source open cannot replace a queued user seek target', () async {
+    final c = Subject()..wire(); final p = c._videoPlayerController!;
+    final gate = Completer<void>();
+    final owner = c._sourceSequence.runCurrent((_) => gate.future);
+    final seek = c.seek(const Duration(seconds: 600));
+    await c.historyOpen(const Duration(seconds: 3648));
+    check(c._seekIntent.pendingTarget!.inSeconds == 600, 'history open overwrote user seek');
+    gate.complete(); await owner; await seek;
+    check(p.state.position.inSeconds == 600, 'queued seek never reached native player');
+  });
   await scenario('EOF resume never replays zero on a late EOF event', () async {
     final c = Subject(); await c.seek(const Duration(seconds: 40));
     check(c._videoPlayerController!.state.position.inSeconds == 40, 'target lost');
@@ -638,15 +684,15 @@ Future<void> main() async {
         socket.write('GET \${uri.path} HTTP/1.1\\r\\nHost: \${uri.host}:\${uri.port}\\r\\nRange: bytes=0-\\r\\n\\r\\n');
         await socket.flush();
       }
-      await waitUntil(() => transport.snapshot()['activeProxyHandlers'] == 4 &&
+      await waitUntil(() => (transport.snapshot()['openProxyResponses'] ?? transport.snapshot()['activeProxyHandlers']) == 4 &&
         (transport.snapshot()['tracks'] as List).every((t) => (t['demands'] as List).any((d) => d['stage'] == 'proxy-write' && d['progressAgeMs'] >= 50)));
       await c.seek(const Duration(seconds: 40));
       check(metrics.cancellations == 0, 'seek cancelled valid GETs');
-      try { await fetchLocal(urls['video']!, range: 'bytes=-100'); throw StateError('expected capacity 503'); }
-      on BtrFailure catch (e) {
-        check(e.status == 503, 'unexpected local status');
-        p.nativeLog('ffmpeg', 'error', 'HTTP error 503 Service Unavailable');
-      }
+      final admitted = await fetchLocal(urls['video']!, range: 'bytes=-100');
+      check(admitted.length == 100, 'blocked writers prevented new read');
+      // Independently inject the classified native error: backpressure alone
+      // no longer creates a 503, but the bounded reopen path must still work.
+      p.nativeLog('ffmpeg', 'error', 'HTTP error 503 Service Unavailable');
       final opened = Completer<void>();
       p.onOpen = () async {
         check(transport.snapshot()['activeProxyHandlers'] == 0 && scheduler.active == 0 && scheduler.queued == 0, 'reload overtook cleanup');

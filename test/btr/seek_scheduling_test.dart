@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
@@ -52,11 +53,56 @@ void main() {
     await cdn.close();
   });
 
+  test('progress above continuous playback demand does not hedge a burst-speed estimate', () async {
+    await setup(const Duration(seconds: 5));
+    transport.adaptive.connectionBps = 100 * 1024 * 1024;
+    // Also run this scenario against the unchanged diagnostic source.
+    try {
+      (transport.adaptive as dynamic).durationSeconds = 60.0;
+    } on NoSuchMethodError {
+      /* older version has no demand estimate */
+    }
+    cdn.handler = (r, range, _) async {
+      r.response.statusCode = 206;
+      r.response.contentLength = range.length;
+      r.response.headers
+        ..set('etag', '"fixture-v1"')
+        ..set(
+          'content-range',
+          'bytes ${range.start}-${range.end}/${bytes.length}',
+        );
+      for (var cursor = range.start; cursor <= range.end; cursor += 65536) {
+        await Future<void>.delayed(const Duration(milliseconds: 55));
+        final end = (cursor + 65536).clamp(0, range.end + 1);
+        r.response.add(Uint8List.sublistView(bytes, cursor, end));
+        await r.response.flush();
+      }
+      await r.response.close();
+      return true;
+    };
+    final before = metrics.networkBytes;
+    final elapsed = Stopwatch()..start();
+    final result = await fetchLocal(url, range: 'bytes=65536-1179647');
+    stdout.writeln(
+      'delivery-observation ${jsonEncode({
+        'usefulBytes': result.length,
+        'upstreamBodyBytes': metrics.networkBytes - before,
+        'elapsedMs': elapsed.elapsedMilliseconds,
+        'hedges': metrics.hedges,
+        'resumes': metrics.resumes,
+      })}',
+    );
+    expect(result, orderedEquals(bytes.sublist(65536, 1179648)));
+    expect(metrics.hedges, 0);
+    expect(metrics.networkBytes - before, result.length);
+  });
+
   test(
     'a sole reader uses the original full window without raising the cap',
     () async {
       await setup(const Duration(seconds: 5));
-      transport.adaptive.connectionBps = 1024 * 1024 / .6;
+      // Keep the piece at its 1 MiB cap despite noisy loopback timing samples.
+      transport.adaptive.connectionBps = 100 * 1024 * 1024;
       expect(
         await fetchLocal(url, range: 'bytes=65536-'),
         bytes.sublist(65536),

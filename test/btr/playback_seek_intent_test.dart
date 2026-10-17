@@ -6,6 +6,31 @@ import 'package:test_api/scaffolding.dart';
 
 void main() {
   test(
+    'history open retains target through zero/EOF and stale open reply',
+    () async {
+      final intent = PlaybackSeekIntent()..reset(playing: true);
+      final revision = intent.beginSource(const Duration(seconds: 3648));
+      expect(intent.acceptCompleted(const Duration(seconds: 4079)), false);
+      intent
+        ..position(Duration.zero, requireProgress: true)
+        ..sourceOpened(revision);
+      expect(intent.pendingTarget, const Duration(seconds: 3648));
+      await intent.seek(
+        completed: false,
+        target: const Duration(seconds: 600),
+        perform: (_) async {},
+        resume: () async {},
+      );
+      intent.sourceOpened(revision);
+      expect(intent.pendingTarget, const Duration(seconds: 600));
+      expect(intent.acceptCompleted(const Duration(seconds: 4079)), false);
+      intent
+        ..position(const Duration(seconds: 600), requireProgress: true)
+        ..position(const Duration(milliseconds: 600100), requireProgress: true);
+      expect(intent.pendingTarget, isNull);
+    },
+  );
+  test(
     'BTR confirms two advancing target samples, not a load reset or EOF clock',
     () async {
       final intent = PlaybackSeekIntent()..reset(playing: true);
