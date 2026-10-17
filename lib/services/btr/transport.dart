@@ -302,6 +302,8 @@ class BtrTrack {
           // Backpressure/disconnect is a local response failure, not evidence
           // that the source or either media representation is permanently bad.
           outcome = 'local-error';
+          owner._localResponseFailures++;
+          owner._localFailureGeneration = owner._seekGeneration;
         } else {
           metrics.failures++;
           lastFailure = failure;
@@ -782,6 +784,11 @@ class BtrTransport {
   int _peakHandlers = 0;
   int _capacityRejections = 0;
   int _invalidRejections = 0;
+  int _retirementRejections = 0;
+  int _localResponseFailures = 0;
+  int? _localFailureGeneration;
+  bool get currentSeekHasLocalFailure =>
+      _localFailureGeneration == _seekGeneration;
   bool _retiring = false;
   Future<void> get settled => Future.wait(_handlers.toList());
   HttpServer? _server;
@@ -856,8 +863,11 @@ class BtrTransport {
         tracks.containsKey(parts[1]) &&
         (r.method == 'GET' || r.method == 'HEAD');
     if (!valid || _retiring || _activeHandlers >= 4) {
-      if (valid) {
+      if (valid && _retiring) {
+        _retirementRejections++;
+      } else if (valid) {
         _capacityRejections++;
+        _localFailureGeneration = _seekGeneration;
       } else {
         _invalidRejections++;
       }
@@ -923,6 +933,9 @@ class BtrTransport {
     'proxyHandlerLimit': 4,
     'proxyCapacityRejections': _capacityRejections,
     'proxyInvalidRejections': _invalidRejections,
+    'proxyRetirementRejections': _retirementRejections,
+    'proxyLocalResponseFailures': _localResponseFailures,
+    'localReadFailureGeneration': _localFailureGeneration,
     'activeConnections': scheduler.active,
     'videoConnections': tracks.containsKey('video')
         ? scheduler.videoActive

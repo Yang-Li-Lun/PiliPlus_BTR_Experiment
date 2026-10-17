@@ -36,6 +36,9 @@ void main() {
     final resume = source.contains('Future<void> _resumeAfterSeek(')
         ? method(source, 'Future<void> _resumeAfterSeek(')
         : '';
+    final recovery = source.contains('void _scheduleBtrReadRecovery(')
+        ? method(source, 'void _scheduleBtrReadRecovery(')
+        : '';
     final fixture =
         File(
           '${root.path}/tool/btr_tests/.dart_tool/controller_recovery_fixture.dart',
@@ -83,13 +86,15 @@ class Player {
 }
 class Transport {
   Transport(this.player); final Player player;
+  bool currentSeekHasLocalFailure = false;
   Future<void> retirePlayerRequests() async { player.calls.add('retire'); }
 }
+typedef BtrPlayback = Session;
 class Session {
   Session(Player p): transport = Transport(p);
   final Transport transport;
   final metrics = BtrMetrics(BtrMode.combined);
-  void seek(Duration p) => metrics.seek(p.inMilliseconds);
+  void seek(Duration p) { metrics.seek(p.inMilliseconds); transport.currentSeekHasLocalFailure = false; }
 }
 class Subject {
   Subject() { _btrPlayback = Session(_videoPlayerController!); }
@@ -104,6 +109,8 @@ class Subject {
   final dataSource = Object();
   final dataStatus = Value(DataStatus.error);
   final showControls = Value(false);
+  final isBuffering = Value(false);
+  final buffered = Value(0);
   final dynamic danmakuController = null, audioSessionHandler = null;
   Status playerStatus = Status.completed;
   Timer? _retryTimer;
@@ -114,6 +121,7 @@ class Subject {
   $seek
   $refresh
   $resume
+  $recovery
 }
 void check(bool ok, String message) { if (!ok) throw StateError(message); }
 Future<void> main() async {
@@ -204,6 +212,47 @@ Future<void> main() async {
     final c = Subject(); await c.seek(const Duration(seconds: 50));
     await (c as dynamic).refreshPlayer(automatic: true);
     check(!c._videoPlayerController!.calls.contains('stop'), 'retry interrupted pending seek');
+  });
+  await scenario('correlated local read failure reopens pending seek once at its target', () async {
+    await runZoned(() async {
+      final c = Subject(); await c.seek(const Duration(seconds: 40));
+      c._btrPlayback!.transport.currentSeekHasLocalFailure = true;
+      (c as dynamic)._scheduleBtrReadRecovery(c._btrPlayback!);
+      await Future<void>.delayed(const Duration(milliseconds: 30));
+      check(c._videoPlayerController!.calls.contains('open:40'), 'local failure did not recover target');
+      check(!c._videoPlayerController!.calls.contains('replay:0'), 'local recovery replayed zero');
+      (c as dynamic)._scheduleBtrReadRecovery(c._btrPlayback!);
+      await Future<void>.delayed(const Duration(milliseconds: 30));
+      check(c._videoPlayerController!.calls.where((s) => s.startsWith('open:')).length == 1, 'unbounded seek recovery');
+    }, zoneSpecification: ZoneSpecification(createTimer: (self, parent, zone, duration, callback) =>
+      parent.createTimer(zone, duration == const Duration(seconds: 3) ? const Duration(milliseconds: 5) : duration, callback)));
+  });
+  await scenario('seek alone never triggers read recovery', () async {
+    final c = Subject(); await c.seek(const Duration(seconds: 40));
+    (c as dynamic)._scheduleBtrReadRecovery(c._btrPlayback!);
+    check(c._retryTimer == null, 'unconfirmed local failure scheduled a retry');
+    check(!c._videoPlayerController!.calls.contains('stop'), 'seek cancelled active streams');
+  });
+  await scenario('new seek cancels recovery of old target', () async {
+    final c = Subject(); await c.seek(const Duration(seconds: 40));
+    c._btrPlayback!.transport.currentSeekHasLocalFailure = true;
+    (c as dynamic)._scheduleBtrReadRecovery(c._btrPlayback!);
+    final timer = c._retryTimer;
+    await c.seek(const Duration(seconds: 50));
+    check(timer != null && !timer.isActive, 'old recovery timer survived seek');
+    check(!c._videoPlayerController!.calls.contains('stop'), 'new seek was interrupted');
+  });
+  await scenario('timeline recovery prevents a delayed reopen', () async {
+    await runZoned(() async {
+      final c = Subject(); await c.seek(const Duration(seconds: 40));
+      c._btrPlayback!.transport.currentSeekHasLocalFailure = true;
+      (c as dynamic)._scheduleBtrReadRecovery(c._btrPlayback!);
+      c._seekIntent.position(const Duration(seconds: 40));
+      c._seekIntent.position(const Duration(milliseconds: 40100));
+      await Future<void>.delayed(const Duration(milliseconds: 30));
+      check(!c._videoPlayerController!.calls.contains('stop'), 'recovered playback was reopened');
+    }, zoneSpecification: ZoneSpecification(createTimer: (self, parent, zone, duration, callback) =>
+      parent.createTimer(zone, duration == const Duration(seconds: 3) ? const Duration(milliseconds: 5) : duration, callback)));
   });
   if (failures.isNotEmpty) throw StateError(failures.join(', '));
 }

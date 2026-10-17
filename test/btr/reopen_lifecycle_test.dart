@@ -56,8 +56,11 @@ void main() {
           (transport.snapshot()['tracks'] as List).every(
             (t) =>
                 (t['demands'] as List).length == 2 &&
-                (t['demands'] as List).every(
-                  (d) => d['stage'] == 'proxy-write',
+                // One request can occupy the shared 4 MiB track window;
+                // another legitimately waits upstream for that reservation.
+                (t['demands'] as List).any(
+                  (d) =>
+                      d['stage'] == 'proxy-write' && d['progressAgeMs'] >= 50,
                 ),
           ),
     );
@@ -130,6 +133,9 @@ void main() {
       throwsA(isA<BtrFailure>().having((e) => e.status, 'status', 503)),
     );
     expect(transport.snapshot()['proxyCapacityRejections'], 1);
+    expect(transport.currentSeekHasLocalFailure, true);
+    transport.seek();
+    expect(transport.currentSeekHasLocalFailure, false);
     expect(
       metrics.events
           .where((e) => e['event'] == 'proxy-rejected')

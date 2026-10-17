@@ -1069,7 +1069,10 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
     audioSessionHandler?.setActive(false);
   }
 
-  Future<void>? refreshPlayer({bool automatic = false}) {
+  Future<void>? refreshPlayer({
+    bool automatic = false,
+    bool recoverSeek = false,
+  }) {
     final session = _btrPlayback;
     if (_taskScope.closed ||
         _processing ||
@@ -1082,15 +1085,15 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
       return null;
     }
     if (automatic && session?.transport != null) {
-      if (_seekIntent.pendingTarget != null || _btrAutomaticReopens >= 1) {
+      if ((_seekIntent.pendingTarget != null &&
+              !(recoverSeek &&
+                  session!.transport!.currentSeekHasLocalFailure)) ||
+          _btrAutomaticReopens >= 1) {
         session!.metrics.event('player-reopen-skipped', {
-          'reason': _seekIntent.pendingTarget != null
-              ? 'seek-pending'
-              : 'retry-budget',
+          'reason': _btrAutomaticReopens >= 1 ? 'retry-budget' : 'seek-pending',
         });
         return null;
       }
-      _btrAutomaticReopens++;
     }
     if (_videoPlayerController case final ctr? when (ctr.current.isNotEmpty)) {
       _retryTimer?.cancel();
@@ -1114,8 +1117,19 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
               });
               return;
             }
+            if (automatic &&
+                recoverSeek &&
+                session?.transport?.currentSeekHasLocalFailure != true) {
+              session?.metrics.event('player-reopen-skipped', {
+                'reason': 'local-failure-stale',
+              });
+              return;
+            }
+            if (automatic && session?.transport != null) _btrAutomaticReopens++;
             session?.metrics.playerOpening(
-              automatic ? 'read-error' : 'user',
+              automatic
+                  ? (recoverSeek ? 'seek-local-read-error' : 'read-error')
+                  : 'user',
               target.inMilliseconds,
             );
             try {
@@ -1124,7 +1138,8 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
               await session?.transport?.retirePlayerRequests();
               if (!isCurrent() ||
                   _taskScope.closed ||
-                  !identical(session, _btrPlayback)) {
+                  !identical(session, _btrPlayback) ||
+                  _btrFailedGeneration == _btrOpenGeneration) {
                 return;
               }
               await ctr.open(media, play: false);
@@ -1143,6 +1158,41 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
           .whenComplete(() => _reopening = false);
     }
     return null;
+  }
+
+  void _scheduleBtrReadRecovery(BtrPlayback session) {
+    if (_taskScope.closed || !identical(session, _btrPlayback)) return;
+    final pendingSeek = _seekIntent.pendingTarget != null;
+    final recoverSeek =
+        pendingSeek && session.transport?.currentSeekHasLocalFailure == true;
+    if (_processing ||
+        _reopening ||
+        _btrAutomaticReopens >= 1 ||
+        (pendingSeek && !recoverSeek)) {
+      session.metrics.event('player-reopen-skipped', {
+        'reason': _btrAutomaticReopens >= 1
+            ? 'retry-budget'
+            : _processing || _reopening
+            ? 'opening'
+            : 'seek-pending',
+      });
+      return;
+    }
+    final generation = _btrOpenGeneration;
+    final seekRevision = _seekIntent.seekRevision;
+    _retryTimer?.cancel();
+    _retryTimer = Timer(const Duration(seconds: 3), () {
+      if (!_taskScope.closed &&
+          generation == _btrOpenGeneration &&
+          identical(session, _btrPlayback) &&
+          seekRevision == _seekIntent.seekRevision &&
+          (recoverSeek
+              ? _seekIntent.pendingTarget != null &&
+                    session.transport?.currentSeekHasLocalFailure == true
+              : isBuffering.value && buffered.value == 0)) {
+        refreshPlayer(automatic: true, recoverSeek: recoverSeek);
+      }
+    });
   }
 
   // 开始播放
@@ -1332,27 +1382,7 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
         if (session?.transport != null &&
             (event.contains('http://127.0.0.1:') ||
                 event.startsWith('tcp: ffurl_read returned '))) {
-          if (_processing || _reopening || _seekIntent.pendingTarget != null) {
-            session!.metrics.event('player-reopen-skipped', {
-              'reason': _seekIntent.pendingTarget != null
-                  ? 'seek-pending'
-                  : 'opening',
-            });
-            return;
-          }
-          final generation = _btrOpenGeneration;
-          final seekRevision = _seekIntent.seekRevision;
-          _retryTimer?.cancel();
-          _retryTimer = Timer(const Duration(seconds: 3), () {
-            if (!_taskScope.closed &&
-                generation == _btrOpenGeneration &&
-                identical(session, _btrPlayback) &&
-                seekRevision == _seekIntent.seekRevision &&
-                isBuffering.value &&
-                buffered.value == 0) {
-              refreshPlayer(automatic: true);
-            }
-          });
+          _scheduleBtrReadRecovery(session!);
           return;
         }
         if (dataSource is FileSource &&
