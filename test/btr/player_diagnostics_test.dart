@@ -4,6 +4,25 @@ import 'package:matcher/expect.dart';
 import 'package:test_api/scaffolding.dart';
 
 void main() {
+  test(
+    'EOF reset retains earlier observed audio and distinct open/seek failures',
+    () {
+      final metrics = BtrMetrics(BtrMode.combined)
+        ..playerOpening('source', 0)
+        ..nativeTracks(1, true)
+        ..nativeCompleted(true)
+        ..nativeTracks(0, null) // locked media-kit EOF event reset
+        ..seekCommand('failed', 40000);
+      final data = metrics.snapshot();
+      expect(data['nativeAudioTrackCount'], 0);
+      expect(data['maxNativeAudioTrackCount'], 1);
+      expect(data['nativeAudioTracksBeforeCompleted'], 1);
+      expect(data['nativeAudioSelectedBeforeCompleted'], true);
+      expect(data['seekCommandFailures'], 1);
+      expect(data['playerOpenCount'], 1);
+      expect(data['terminalFailures'], null);
+    },
+  );
   test('player error context contains categories without native secrets', () {
     final metrics = BtrMetrics(BtrMode.combined)
       ..seek(10000)

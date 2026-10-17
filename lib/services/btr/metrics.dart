@@ -49,6 +49,11 @@ class BtrMetrics {
   int playerErrors = 0;
   bool? separateAudioExpected;
   int? nativeAudioTracks;
+  int? maxNativeAudioTracks;
+  int? audioTracksBeforeCompleted;
+  bool? audioSelectedBeforeCompleted;
+  int playerOpenCount = 0;
+  int seekCommandFailures = 0;
   bool? nativeAudioSelected;
   double? nativePlayerVolume;
   int? startupMs;
@@ -104,7 +109,51 @@ class BtrMetrics {
     _seekAt = now();
     _seekTarget = positionMs;
     _previousPosition = null;
-    event('seek');
+    event('seek', {'targetMs': positionMs});
+  }
+
+  void seekCommand(String outcome, int targetMs) {
+    if (outcome == 'failed') seekCommandFailures++;
+    event('seek-command', {'outcome': outcome, 'targetMs': targetMs});
+  }
+
+  void playerOpening(String reason, int targetMs) {
+    playerOpenCount++;
+    event('player-open', {
+      'reason': reason,
+      'open': playerOpenCount,
+      'targetMs': targetMs,
+    });
+  }
+
+  void nativeTracks(int count, bool? selected) {
+    if (nativeAudioTracks != count || nativeAudioSelected != selected) {
+      event('native-audio-state', {
+        'count': count,
+        'selected': ?selected,
+        'completed': completed == true,
+        'open': playerOpenCount,
+      });
+    }
+    nativeAudioTracks = count;
+    nativeAudioSelected = selected;
+    final previous = maxNativeAudioTracks;
+    maxNativeAudioTracks = previous == null || count > previous
+        ? count
+        : previous;
+  }
+
+  void nativeCompleted(bool value) {
+    if (value && completed != true) {
+      audioTracksBeforeCompleted = nativeAudioTracks;
+      audioSelectedBeforeCompleted = nativeAudioSelected;
+      event('player-completed', {
+        'audioTracksBefore': ?nativeAudioTracks,
+        'audioSelectedBefore': ?nativeAudioSelected,
+        'seekPending': _seekAt != null,
+      });
+    }
+    completed = value;
   }
 
   // Categorize native errors without storing URLs, signed queries, codec names,
@@ -196,6 +245,11 @@ class BtrMetrics {
       'playerErrors': playing == null ? null : playerErrors,
       'separateAudioExpected': separateAudioExpected,
       'nativeAudioTrackCount': nativeAudioTracks,
+      'maxNativeAudioTrackCount': maxNativeAudioTracks,
+      'nativeAudioTracksBeforeCompleted': audioTracksBeforeCompleted,
+      'nativeAudioSelectedBeforeCompleted': audioSelectedBeforeCompleted,
+      'playerOpenCount': playerOpenCount,
+      'seekCommandFailures': seekCommandFailures,
       'nativeAudioSelected': nativeAudioSelected,
       'nativePlayerVolume': nativePlayerVolume,
       'networkBytesIncludingProbesAndHedges': measured ? networkBytes : null,

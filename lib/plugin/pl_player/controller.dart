@@ -84,6 +84,8 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
   BtrPlayback? get btrPlayback => _btrPlayback;
   int _btrOpenGeneration = 0;
   int _btrFailedGeneration = -1;
+  bool _reopening = false;
+  int _btrAutomaticReopens = 0;
   final _seekIntent = PlaybackSeekIntent();
   final _sourceSequence = PlaybackSourceSequence();
   late final PlaybackTaskScope _taskScope;
@@ -738,6 +740,7 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
     _retryTimer = null;
     _cancelSubForSeek();
     _seekIntent.reset(playing: autoplay);
+    _btrAutomaticReopens = 0;
     return _sourceSequence.run((isCurrent) async {
       if (_taskScope.closed || !isCurrent()) return;
       await videoPlayerServiceHandler?.beginPlayback();
@@ -1012,6 +1015,7 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
       );
     }
     try {
+      session?.metrics.playerOpening('source', seekTo?.inMilliseconds ?? 0);
       await player.open(
         Media(video, start: seekTo, extras: extras.isEmpty ? null : extras),
         play: false,
@@ -1065,9 +1069,11 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
     audioSessionHandler?.setActive(false);
   }
 
-  Future<void>? refreshPlayer() {
+  Future<void>? refreshPlayer({bool automatic = false}) {
+    final session = _btrPlayback;
     if (_taskScope.closed ||
         _processing ||
+        _reopening ||
         !(_btrSourceIsCurrent?.call() ?? true) ||
         _btrFailedGeneration == _btrOpenGeneration) {
       return null;
@@ -1075,10 +1081,66 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
     if (dataSource is FileSource) {
       return null;
     }
+    if (automatic && session?.transport != null) {
+      if (_seekIntent.pendingTarget != null || _btrAutomaticReopens >= 1) {
+        session!.metrics.event('player-reopen-skipped', {
+          'reason': _seekIntent.pendingTarget != null
+              ? 'seek-pending'
+              : 'retry-budget',
+        });
+        return null;
+      }
+      _btrAutomaticReopens++;
+    }
     if (_videoPlayerController case final ctr? when (ctr.current.isNotEmpty)) {
+      _retryTimer?.cancel();
+      _retryTimer = null;
+      _reopening = true;
       var media = ctr.current.last;
-      if (!isLive) media = media.copyWith(start: ctr.state.position);
-      return ctr.open(media, play: _seekIntent.playRequested);
+      final target = _seekIntent.pendingTarget ?? ctr.state.position;
+      final seekRevision = _seekIntent.seekRevision;
+      if (!isLive) media = media.copyWith(start: target);
+      return _sourceSequence
+          .runCurrent((isCurrent) async {
+            if (!isCurrent() ||
+                _taskScope.closed ||
+                !identical(ctr, _videoPlayerController)) {
+              return;
+            }
+            // A queued retry must not unload a newer seek's current stream.
+            if (automatic && seekRevision != _seekIntent.seekRevision) {
+              session?.metrics.event('player-reopen-skipped', {
+                'reason': 'new-seek',
+              });
+              return;
+            }
+            session?.metrics.playerOpening(
+              automatic ? 'read-error' : 'user',
+              target.inMilliseconds,
+            );
+            try {
+              await ctr.stop();
+              // stop is the ownership boundary: only now may all old GETs retire.
+              await session?.transport?.retirePlayerRequests();
+              if (!isCurrent() ||
+                  _taskScope.closed ||
+                  !identical(session, _btrPlayback)) {
+                return;
+              }
+              await ctr.open(media, play: false);
+              if (!isCurrent() || _taskScope.closed) return;
+              if (_seekIntent.playRequested) await ctr.play();
+              session?.metrics.event('player-open-ended', {
+                'outcome': 'command-complete',
+              });
+            } catch (_) {
+              session?.metrics.event('player-open-ended', {
+                'outcome': 'failed',
+              });
+              if (isCurrent()) dataStatus.value = DataStatus.error;
+            }
+          })
+          .whenComplete(() => _reopening = false);
     }
     return null;
   }
@@ -1188,6 +1250,11 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
 
       ///completed
       stream.completed.listen((bool completed) {
+        // A late EOF notification during seek is not completion of the target.
+        // Leave it observable in BTR diagnostics, without auto-next/replay UI.
+        if (completed && !_seekIntent.acceptCompleted(player.state.duration)) {
+          return;
+        }
         if (completed) {
           playerStatus = .completed;
           _startWakeLockTimer();
@@ -1202,6 +1269,18 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
 
       /// position
       stream.position.listen((Duration position) {
+        final wasSeeking = _seekIntent.pendingTarget != null;
+        _seekIntent.position(position);
+        if (wasSeeking &&
+            _seekIntent.pendingTarget == null &&
+            position < player.state.duration &&
+            player.state.completed) {
+          // Native seek's reply is not a playback-restart barrier. Only actual
+          // forward progress near the target can dismiss a late EOF flag.
+          player.state.completed = false;
+          _btrPlayback?.metrics.nativeCompleted(false);
+          playerStatus = player.state.playing ? .playing : .paused;
+        }
         final posInSeconds = position.inSeconds;
 
         if (posInSeconds != this.position.value) {
@@ -1249,6 +1328,33 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
           _stopTerminalBtr(_btrPlayback!);
           return;
         }
+        final session = _btrPlayback;
+        if (session?.transport != null &&
+            (event.contains('http://127.0.0.1:') ||
+                event.startsWith('tcp: ffurl_read returned '))) {
+          if (_processing || _reopening || _seekIntent.pendingTarget != null) {
+            session!.metrics.event('player-reopen-skipped', {
+              'reason': _seekIntent.pendingTarget != null
+                  ? 'seek-pending'
+                  : 'opening',
+            });
+            return;
+          }
+          final generation = _btrOpenGeneration;
+          final seekRevision = _seekIntent.seekRevision;
+          _retryTimer?.cancel();
+          _retryTimer = Timer(const Duration(seconds: 3), () {
+            if (!_taskScope.closed &&
+                generation == _btrOpenGeneration &&
+                identical(session, _btrPlayback) &&
+                seekRevision == _seekIntent.seekRevision &&
+                isBuffering.value &&
+                buffered.value == 0) {
+              refreshPlayer(automatic: true);
+            }
+          });
+          return;
+        }
         if (dataSource is FileSource &&
             event.startsWith("Failed to open file")) {
           return;
@@ -1260,7 +1366,7 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
             _retryTimer?.cancel();
             _retryTimer = Timer(
               const Duration(milliseconds: 3000),
-              refreshPlayer,
+              () => refreshPlayer(automatic: true),
             );
           }
           return;
@@ -1287,7 +1393,7 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
                     '视频链接打开失败，重试中',
                     displayTime: const Duration(milliseconds: 500),
                   );
-                  refreshPlayer();
+                  refreshPlayer(automatic: true);
                 }
               });
             },
@@ -1333,6 +1439,8 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
 
   Future<void> seek(Duration position, {bool isSeek = false}) async {
     _cancelSubForSeek();
+    _retryTimer?.cancel();
+    _retryTimer = null;
     final player = _videoPlayerController;
     if (player == null || _taskScope.closed) return;
     final generation = _btrOpenGeneration;
@@ -1341,6 +1449,9 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
     try {
       final current = await _seekIntent.seek(
         completed: completed,
+        target: position,
+        serialize: (operation) =>
+            _sourceSequence.runCurrent((_) => operation()),
         isCurrentSource: () =>
             !_taskScope.closed &&
             generation == _btrOpenGeneration &&
@@ -1368,8 +1479,24 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
           danmakuController?.clear();
           session?.seek(position);
           await player.seek(position);
+          session?.metrics.seekCommand(
+            'command-complete',
+            position.inMilliseconds,
+          );
         },
-        resume: () => play(hideControls: !showControls.value),
+        resume: () async {
+          if (player.state.duration > Duration.zero &&
+              position >= player.state.duration) {
+            return;
+          }
+          // NativePlayer.play replays from zero if a late eof-reached event
+          // reasserted completed after seek's command reply. Resume the chosen
+          // position without entering that replay branch or issuing loadfile.
+          await _resumeAfterSeek(player);
+          if (_seekIntent.playRequested && !_taskScope.closed) {
+            audioSessionHandler?.setActive(true);
+          }
+        },
       );
       if (current &&
           generation == _btrOpenGeneration &&
@@ -1381,6 +1508,7 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
         _updateIOSPip(position);
       }
     } catch (e) {
+      session?.metrics.seekCommand('failed', position.inMilliseconds);
       if (kDebugMode) debugPrint('seek failed: $e');
     }
   }
@@ -1443,6 +1571,23 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
   }
 
   /// 播放视频
+  Future<void> _resumeAfterSeek(Player player) async {
+    // Match the locked native seek/play contract: clear a late EOF flag inside
+    // the SAME native lock as play's synchronous completed/replay decision.
+    // Keep media-kit's playing notification and pause bookkeeping intact.
+    await player.lock.synchronized(() async {
+      if (!_seekIntent.playRequested ||
+          _taskScope.closed ||
+          !identical(player, _videoPlayerController) ||
+          !(_btrSourceIsCurrent?.call() ?? true)) {
+        return;
+      }
+      player.state.completed = false;
+      await player.play(synchronized: false);
+      _btrPlayback?.metrics.nativeCompleted(false);
+    });
+  }
+
   Future<void> play({bool repeat = false, bool hideControls = true}) async {
     if (_playerCount == 0 || _taskScope.closed) return;
     if (_btrFailedGeneration == _btrOpenGeneration) return;
@@ -1463,7 +1608,11 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
         !identical(player, _videoPlayerController)) {
       return;
     }
-    await player?.play();
+    if (player != null && _seekIntent.pendingTarget != null) {
+      await _resumeAfterSeek(player);
+    } else {
+      await player?.play();
+    }
     if (!_seekIntent.isCurrent(intent)) return;
 
     audioSessionHandler?.setActive(true);
@@ -1615,8 +1764,9 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
   }
 
   bool get isCompleted =>
-      videoPlayerController!.state.completed ||
-      durationInMilliseconds - positionInMilliseconds <= 50;
+      _seekIntent.pendingTarget == null &&
+      (videoPlayerController!.state.completed ||
+          durationInMilliseconds - positionInMilliseconds <= 50);
 
   // 双击播放、暂停
   Future<void> onDoubleTapCenter() async {

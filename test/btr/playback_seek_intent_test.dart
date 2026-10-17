@@ -6,6 +6,52 @@ import 'package:test_api/scaffolding.dart';
 
 void main() {
   test(
+    'end target accepts completion while a backward target rejects stale EOF',
+    () async {
+      final intent = PlaybackSeekIntent();
+      await intent.seek(
+        completed: false,
+        target: const Duration(seconds: 60),
+        perform: (_) async {},
+        resume: () async {},
+      );
+      expect(intent.acceptCompleted(const Duration(seconds: 60)), true);
+      expect(intent.pendingTarget, isNull);
+      await intent.seek(
+        completed: true,
+        target: const Duration(seconds: 20),
+        perform: (_) async {},
+        resume: () async {},
+      );
+      expect(intent.acceptCompleted(const Duration(seconds: 60)), false);
+      expect(intent.pendingTarget, const Duration(seconds: 20));
+    },
+  );
+  test('target survives command completion and reopen position reset until timeline advances', () async {
+    final intent = PlaybackSeekIntent();
+    await intent.seek(
+      completed: false,
+      target: const Duration(seconds: 40),
+      perform: (_) async {},
+      resume: () async {},
+    );
+    expect(intent.pendingTarget, const Duration(seconds: 40));
+    intent.position(Duration.zero);
+    expect(intent.pendingTarget, const Duration(seconds: 40));
+    intent.position(const Duration(seconds: 40));
+    expect(intent.pendingTarget, isNull);
+    await intent.seek(
+      completed: false,
+      target: const Duration(seconds: 1),
+      perform: (_) async {},
+      resume: () async {},
+    );
+    intent.position(Duration.zero);
+    expect(intent.pendingTarget, const Duration(seconds: 1));
+    intent.reset();
+    expect(intent.pendingTarget, isNull);
+  });
+  test(
     'pause during an autoplay source load keeps latest intent paused',
     () async {
       final intent = PlaybackSeekIntent()..reset(playing: true);

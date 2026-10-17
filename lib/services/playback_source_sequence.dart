@@ -10,6 +10,19 @@ class PlaybackSourceSequence {
     Future<void> Function(bool Function() isCurrent) operation,
   ) {
     final revision = ++_revision;
+    return _enqueue(revision, operation);
+  }
+
+  /// Native seek/reopen work shares ownership with source loads without
+  /// invalidating the currently selected source. A new source skips old work.
+  Future<void> runCurrent(
+    Future<void> Function(bool Function() isCurrent) operation,
+  ) => _enqueue(_revision, operation);
+
+  Future<void> _enqueue(
+    int revision,
+    Future<void> Function(bool Function() isCurrent) operation,
+  ) {
     bool isCurrent() => revision == _revision;
     final pending = _settled.then((_) async {
       if (isCurrent()) await operation(isCurrent);

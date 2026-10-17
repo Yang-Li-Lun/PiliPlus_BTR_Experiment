@@ -127,7 +127,7 @@ class BtrPlayback {
       player.stream.playing.listen((value) => metrics.playing = value),
     );
     _subscriptions.add(
-      player.stream.completed.listen((value) => metrics.completed = value),
+      player.stream.completed.listen(metrics.nativeCompleted),
     );
     _subscriptions.add(
       player.stream.position.listen((p) {
@@ -136,16 +136,21 @@ class BtrPlayback {
     );
     _subscriptions.add(
       player.stream.tracks.listen((tracks) {
-        metrics.nativeAudioTracks = tracks.audio
+        final count = tracks.audio
             .where((track) => track.id != 'auto' && track.id != 'no')
             .length;
+        metrics.nativeTracks(count, metrics.nativeAudioSelected);
       }),
     );
     _subscriptions.add(
       player.stream.track.listen((track) {
-        metrics.nativeAudioSelected = track.audio.id == 'auto'
+        final selected = track.audio.id == 'auto'
             ? null
             : track.audio.id != 'no';
+        // Unknown until a track-list event has actually been observed.
+        if (metrics.nativeAudioTracks case final count?) {
+          metrics.nativeTracks(count, selected);
+        }
       }),
     );
     _subscriptions.add(

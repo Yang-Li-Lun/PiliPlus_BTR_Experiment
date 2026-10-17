@@ -28,8 +28,12 @@ class _Attempt {
 }
 
 class _Demand {
-  _Demand(this.id, this.generation);
+  _Demand(this.id, this.generation, this.startedAt) : progressAt = startedAt;
   final int id, generation;
+  final int startedAt;
+  int progressAt;
+  int deliveredBytes = 0;
+  String stage = 'discovery';
   final token = BtrCancel();
   String? cancellation;
 }
@@ -190,7 +194,7 @@ class BtrTrack {
   Future<void> serve(HttpRequest request) async {
     if (terminal) throw const BtrFailure('track-ended');
     lifetime.check();
-    final demand = _Demand(++_nextDemand, owner._seekGeneration);
+    final demand = _Demand(++_nextDemand, owner._seekGeneration, metrics.now());
     final token = demand.token;
     _demands.add(demand);
     final isHead = request.method == 'HEAD';
@@ -234,7 +238,9 @@ class BtrTrack {
         );
         request.response.contentLength = 0;
         stage = 'proxy-close';
-        await request.response.close();
+        await token.bind(
+          request.response.close().timeout(const Duration(seconds: 2)),
+        );
         outcome = 'range-rejected';
         return;
       }
@@ -258,12 +264,14 @@ class BtrTrack {
       }
       if (!isHead) {
         stage = 'upstream';
+        demand.stage = stage;
         final stream = owner.mode.usesThreads && identity.canSegment
             ? _ordered(range, token)
             : _direct(range, token);
         await for (final bytes in stream) {
           token.check();
           stage = 'proxy-write';
+          demand.stage = stage;
           sent = true;
           response.add(bytes);
           await token.bind(
@@ -274,11 +282,16 @@ class BtrTrack {
           adaptive.delivered(bytes.length);
           delivered += bytes.length;
           stage = 'upstream';
+          demand
+            ..stage = stage
+            ..deliveredBytes = delivered
+            ..progressAt = metrics.now();
         }
       }
       token.check();
       stage = 'proxy-close';
-      await response.close().timeout(const Duration(seconds: 5));
+      demand.stage = stage;
+      await token.bind(response.close().timeout(const Duration(seconds: 5)));
       outcome = 'complete';
       if (!isHead) _recoverableFailures = 0;
     } catch (error) {
@@ -765,6 +778,11 @@ class BtrTransport {
   late final BtrAdaptive adaptive;
   final tracks = <String, BtrTrack>{};
   final _handlers = <Future<void>>{};
+  int _activeHandlers = 0;
+  int _peakHandlers = 0;
+  int _capacityRejections = 0;
+  int _invalidRejections = 0;
+  bool _retiring = false;
   Future<void> get settled => Future.wait(_handlers.toList());
   HttpServer? _server;
   final _capability = List.generate(
@@ -837,22 +855,59 @@ class BtrTransport {
         parts[0] == _capability &&
         tracks.containsKey(parts[1]) &&
         (r.method == 'GET' || r.method == 'HEAD');
-    if (!valid || _handlers.length >= 4) {
+    if (!valid || _retiring || _activeHandlers >= 4) {
+      if (valid) {
+        _capacityRejections++;
+      } else {
+        _invalidRejections++;
+      }
+      metrics.event('proxy-rejected', {
+        'status': valid ? 503 : 403,
+        'reason': !valid
+            ? 'invalid-request'
+            : _retiring
+            ? 'player-stopped'
+            : 'handler-capacity',
+        'activeHandlers': _activeHandlers,
+        'generation': _seekGeneration,
+        if (valid) 'track': parts[1],
+      });
       r.response.statusCode = valid ? 503 : 403;
       r.response.contentLength = 0;
-      await r.response.close();
+      await r.response.close().timeout(const Duration(seconds: 2));
       return;
     }
+    _activeHandlers++;
+    _peakHandlers = math.max(_peakHandlers, _activeHandlers);
     try {
       await tracks[parts[1]]!.serve(r);
     } catch (_) {
       try {
         r.response.statusCode = 502;
         r.response.contentLength = 0;
-        await r.response.close();
+        await r.response.close().timeout(const Duration(seconds: 2));
       } catch (_) {
         /* disconnected */
       }
+    } finally {
+      _activeHandlers--;
+    }
+  }
+
+  /// Caller must first stop the native player. Unlike a seek or another GET,
+  /// that explicit unload proves no response belongs to an active consumer.
+  /// Wait for cancelled producers and handlers before opening the same URLs.
+  Future<void> retirePlayerRequests() async {
+    _retiring = true;
+    try {
+      for (final track in tracks.values) {
+        for (final demand in track._demands) {
+          track._cancelDemand(demand, 'player-stopped');
+        }
+      }
+      await settled;
+    } finally {
+      _retiring = false;
     }
   }
 
@@ -863,6 +918,11 @@ class BtrTransport {
   }
 
   Map<String, Object?> snapshot() => {
+    'activeProxyHandlers': _activeHandlers,
+    'peakProxyHandlers': _peakHandlers,
+    'proxyHandlerLimit': 4,
+    'proxyCapacityRejections': _capacityRejections,
+    'proxyInvalidRejections': _invalidRejections,
     'activeConnections': scheduler.active,
     'videoConnections': tracks.containsKey('video')
         ? scheduler.videoActive
@@ -894,6 +954,17 @@ class BtrTransport {
             'peakOrderedReservationBytes': t.peakReservedBytes,
             'terminal': t.terminal,
             'activeDemands': t._demands.length,
+            'demands': [
+              for (final d in t._demands)
+                {
+                  'request': d.id,
+                  'generation': d.generation,
+                  'stage': d.stage,
+                  'ageMs': metrics.now() - d.startedAt,
+                  'progressAgeMs': metrics.now() - d.progressAt,
+                  'deliveredBytes': d.deliveredBytes,
+                },
+            ],
             'orderedReservationBytes': t._reservedBytes,
             'recoverableDemandFailures': t._recoverableFailures,
             'health': {
