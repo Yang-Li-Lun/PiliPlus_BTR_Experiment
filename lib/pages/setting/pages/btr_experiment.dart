@@ -17,7 +17,10 @@ class _BtrExperimentPageState extends State<BtrExperimentPage> {
   bool _saving = false;
   bool _diagnosticBusy = false;
 
-  Future<void> _diagnostics({required bool export}) async {
+  Future<void> _diagnostics({
+    required bool export,
+    bool deviceTest = false,
+  }) async {
     if (_diagnosticBusy) return;
     setState(() => _diagnosticBusy = true);
     String message;
@@ -25,9 +28,10 @@ class _BtrExperimentPageState extends State<BtrExperimentPage> {
       if (export) {
         // Freeze and serialize before opening the system picker. Playback may
         // continue or end while the user chooses a destination.
-        final result = await BtrDiagnosticsExport.save(
-          BtrPlayback.diagnosticReport(),
-        );
+        final report = BtrPlayback.diagnosticReport();
+        final result = deviceTest
+            ? await BtrDiagnosticsExport.saveDeviceTest(report)
+            : await BtrDiagnosticsExport.save(report);
         message = switch (result) {
           BtrExportResult.saved => '完整診斷已儲存，UTF-8 檔案內容核對成功。',
           BtrExportResult.cancelled => '已取消匯出診斷。',
@@ -199,6 +203,14 @@ class _BtrExperimentPageState extends State<BtrExperimentPage> {
           icon: const Icon(Icons.copy),
           label: const Text('複製精簡診斷'),
         ),
+        if (BtrDiagnosticsExport.deviceTest)
+          TextButton.icon(
+            onPressed: _diagnosticBusy
+                ? null
+                : () => _diagnostics(export: true, deviceTest: true),
+            icon: const Icon(Icons.save_alt),
+            label: const Text('保存實機量測 JSON（App 專屬目錄）'),
+          ),
         if (_diagnosticBusy) const LinearProgressIndicator(),
         const Text(
           '僅保留最近 8 次播放、每次最多 128 個事件及 32 次 Seek；顯示開關不影響錯誤計數。紀錄不含完整 URL、Cookie、Token 或帳號資訊。',

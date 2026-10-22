@@ -17,6 +17,7 @@ dependencies:
   flutter:
     sdk: flutter
   file_picker: 13.1.0
+  path_provider: 2.1.6
 dev_dependencies:
   flutter_test:
     sdk: flutter

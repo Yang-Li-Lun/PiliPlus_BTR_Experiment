@@ -1,14 +1,38 @@
-import 'dart:io' show File;
+import 'dart:io' show Directory, File, Platform;
 
 import 'package:PiliPlus/services/btr/diagnostics.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
+import 'package:path_provider/path_provider.dart';
 
 enum BtrExportResult { saved, cancelled, noSpace, verificationFailed, failed }
 
 abstract final class BtrDiagnosticsExport {
   static const _channel = MethodChannel('piliplus/btr_diagnostics_export');
+  static const deviceTest = bool.fromEnvironment('BTR_DEVICE_TEST');
+
+  // Opt-in DEV measurement build only; no timer, player access or extra probes.
+  static Future<BtrExportResult> saveDeviceTest(String json) async {
+    if (!deviceTest || !Platform.isAndroid) return BtrExportResult.failed;
+    try {
+      final root = await getExternalStorageDirectory();
+      if (root == null) return BtrExportResult.failed;
+      final directory = await Directory('${root.path}/btr-device-measurements')
+          .create(recursive: true);
+      final file = File(
+        '${directory.path}/btr-${DateTime.now().microsecondsSinceEpoch}.json',
+      );
+      if (await file.exists()) return BtrExportResult.failed;
+      final bytes = BtrDiagnostics.utf8Bytes(json);
+      await file.writeAsBytes(bytes, flush: true);
+      return listEquals(bytes, await file.readAsBytes())
+          ? BtrExportResult.saved
+          : BtrExportResult.verificationFailed;
+    } catch (_) {
+      return BtrExportResult.failed;
+    }
+  }
 
   static Future<BtrExportResult> save(String json) async {
     final bytes = BtrDiagnostics.utf8Bytes(json);
