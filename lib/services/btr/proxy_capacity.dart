@@ -2,7 +2,7 @@ import 'dart:async';
 
 import 'package:PiliPlus/services/btr/scheduler.dart';
 
-/// Four executing requests; blocked socket writers may lend their slot.
+/// Four executing requests; writers lend slots at backpressure or chunk boundaries.
 /// Their response and current bytes stay alive. Total admitted responses,
 /// including waiters and blocked writers, are bounded separately at eight.
 class BtrProxyCapacity {
@@ -13,6 +13,7 @@ class BtrProxyCapacity {
   int parked = 0;
   int peak = 0;
   int suspensions = 0;
+  int cooperativeYields = 0;
   final _waiters = <Completer<void>>[];
 
   BtrProxySlot? admit() {
@@ -81,6 +82,14 @@ class BtrProxySlot {
     } finally {
       timer.cancel();
       if (blocked) owner.parked--;
+    }
+    // Continuously consumed responses also need to admit waiting audio/seek
+    // requests. Keep response ownership and bytes; the caller reacquires before
+    // producing another chunk. Let awakened waiters run before that reacquire.
+    if (_held && owner._waiters.isNotEmpty) {
+      owner.cooperativeYields++;
+      _release();
+      await token.bind(Future<void>.delayed(Duration.zero));
     }
   }
 

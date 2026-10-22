@@ -1177,6 +1177,7 @@ class BtrTransport {
     'openProxyResponses': _capacity.responses,
     'proxyResponseLimit': BtrProxyCapacity.responseLimit,
     'parkedProxyWriters': _capacity.parked,
+    'proxyCooperativeYields': _capacity.cooperativeYields,
     'waitingProxyResponses':
         _capacity.responses - _capacity.active - _capacity.parked,
     'proxyWriterSuspensions': _capacity.suspensions,
