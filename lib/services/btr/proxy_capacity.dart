@@ -35,6 +35,7 @@ class BtrProxySlot {
   final BtrProxyCapacity owner;
   bool _held = false;
   bool _closed = false;
+  bool get holdsExecutionSlot => _held;
 
   Future<void> acquire(BtrCancel token) async {
     while (!_held) {

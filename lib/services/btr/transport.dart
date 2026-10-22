@@ -10,6 +10,7 @@ import 'package:PiliPlus/services/btr/metrics.dart';
 import 'package:PiliPlus/services/btr/network.dart';
 import 'package:PiliPlus/services/btr/policy.dart';
 import 'package:PiliPlus/services/btr/proxy_capacity.dart';
+import 'package:PiliPlus/services/btr/proxy_diagnostics.dart';
 import 'package:PiliPlus/services/btr/scheduler.dart';
 import 'package:PiliPlus/services/btr/settings.dart';
 
@@ -30,7 +31,9 @@ class _Attempt {
 }
 
 class _Demand {
-  _Demand(this.id, this.generation, this.startedAt) : progressAt = startedAt;
+  _Demand(this.id, this.generation, this.startedAt, this.trace)
+    : progressAt = startedAt;
+  final BtrProxyTrace? trace;
   final int id, generation;
   final int startedAt;
   int progressAt;
@@ -206,6 +209,9 @@ class BtrTrack {
       metrics.cancellations++;
       demand.cancellation = reason;
       demand.token.cancel();
+      if (demand.trace case final trace?) {
+        owner._proxyDiagnostics.record('demand-cancelled', trace);
+      }
     }
   }
 
@@ -220,6 +226,7 @@ class BtrTrack {
     HttpRequest request, {
     BtrProxySlot? slot,
     int? generation,
+    BtrProxyTrace? trace,
   }) async {
     if (terminal) throw const BtrFailure('track-ended');
     lifetime.check();
@@ -227,6 +234,7 @@ class BtrTrack {
       ++_nextDemand,
       generation ?? owner._seekGeneration,
       metrics.now(),
+      trace,
     );
     final token = demand.token;
     _demands.add(demand);
@@ -240,7 +248,21 @@ class BtrTrack {
     var delivered = 0;
     var stage = 'discovery';
     var outcome = 'cancelled';
+    var demandEnded = false;
     String? failure;
+    trace?.demandState = () => {
+      'demand': demand.id,
+      'phase': stage,
+      'deliveredBytes': delivered,
+      'progressAgeMs': delivered == 0
+          ? null
+          : metrics.now() - demand.progressAt,
+      'backpressured': demand.backpressured,
+      'tokenCancelled': token.cancelled,
+      'cancellation': demand.cancellation,
+      'outcome': demandEnded ? outcome : null,
+    };
+    if (trace != null) owner._proxyDiagnostics.record('serving', trace);
     request.response.done.then(
       (_) {},
       onError: (Object _) {
@@ -271,6 +293,10 @@ class BtrTrack {
         );
         request.response.contentLength = 0;
         stage = 'proxy-close';
+        trace?.serverCloseRequested = true;
+        if (trace != null) {
+          owner._proxyDiagnostics.record('close-requested', trace);
+        }
         await token.bind(
           request.response.close().timeout(const Duration(seconds: 2)),
         );
@@ -355,6 +381,10 @@ class BtrTrack {
       token.check();
       stage = 'proxy-close';
       demand.stage = stage;
+      trace?.serverCloseRequested = true;
+      if (trace != null) {
+        owner._proxyDiagnostics.record('close-requested', trace);
+      }
       await token.bind(response.close().timeout(const Duration(seconds: 5)));
       outcome = 'complete';
       if (!isHead && demand.generation == _latestGetGeneration) {
@@ -413,6 +443,10 @@ class BtrTrack {
           request.response.statusCode = 502;
           request.response.headers.clear();
           request.response.contentLength = 0;
+          trace?.serverCloseRequested = true;
+          if (trace != null) {
+            owner._proxyDiagnostics.record('close-requested', trace);
+          }
           await request.response.close().timeout(const Duration(seconds: 2));
         } catch (_) {
           /* client already disconnected */
@@ -422,11 +456,17 @@ class BtrTrack {
         // detachSocket is illegal once headers have been sent. A deadline
         // terminates this incomplete response and its socket immediately.
         request.response.deadline = Duration.zero;
+        trace?.serverDeadlineApplied = true;
+        if (trace != null) {
+          owner._proxyDiagnostics.record('deadline-applied', trace);
+        }
       }
     } finally {
       token.cancel();
       unlink();
       _demands.remove(demand);
+      demandEnded = true;
+      if (trace != null) owner._proxyDiagnostics.record('demand-ended', trace);
       metrics.event('demand-ended', {
         'track': spec.kind,
         'request': demand.id,
@@ -964,6 +1004,10 @@ class BtrTransport {
     this.network =
         network ?? BtrNetwork(this.scheduler, metrics, headers: headers);
     adaptive = BtrAdaptive(this.scheduler, automatic: settings.autoConcurrency);
+    _proxyDiagnostics = BtrProxyDiagnostics(
+      now: () => metrics.now() - metrics.openedAt,
+      capacity: _proxyCapacityState,
+    );
   }
   final BtrMode mode;
   final BtrMetrics metrics;
@@ -975,6 +1019,18 @@ class BtrTransport {
   final _handlers = <Future<void>>{};
   final _capacity = BtrProxyCapacity();
   final _admissions = <BtrCancel>{};
+  late final BtrProxyDiagnostics _proxyDiagnostics;
+  int _nextProxyRequest = 0;
+  Map<String, Object> _proxyCapacityState() => {
+    'openResponses': _capacity.responses,
+    'responseLimit': BtrProxyCapacity.responseLimit,
+    'activeHandlers': _capacity.active,
+    'handlerLimit': BtrProxyCapacity.activeLimit,
+    'parkedWriters': _capacity.parked,
+    'pendingAdmissions': _admissions.length,
+    'upstreamConnections': scheduler.active,
+    'upstreamResourceLimit': BtrScheduler.resourceLimit,
+  };
   int _capacityRejections = 0;
   int _invalidRejections = 0;
   int _retirementRejections = 0;
@@ -1061,6 +1117,8 @@ class BtrTransport {
   }
 
   Future<void> _handle(HttpRequest r) async {
+    final requestId = ++_nextProxyRequest;
+    final enteredAt = metrics.now();
     final generation = _seekGeneration;
     final parts = r.uri.pathSegments;
     final valid =
@@ -1087,6 +1145,17 @@ class BtrTransport {
         _invalidRejections++;
       }
       metrics.event('proxy-rejected', {
+        ..._proxyDiagnostics.rejected(
+          request: requestId,
+          cause: !valid
+              ? 'invalid-request'
+              : _retiring
+              ? 'player-stopped'
+              : 'response-limit',
+          generation: generation,
+          waitMs: 0,
+          track: valid ? parts[1] : null,
+        ),
         'status': valid ? 503 : 403,
         'reason': !valid
             ? 'invalid-request'
@@ -1104,6 +1173,21 @@ class BtrTransport {
     }
     final admission = BtrCancel();
     _admissions.add(admission);
+    final trace = BtrProxyTrace(
+      requestId,
+      parts[1],
+      r.method,
+      generation,
+      enteredAt - metrics.openedAt,
+    )..holdsExecutionSlot = () => slot!.holdsExecutionSlot;
+    _proxyDiagnostics.admitted(trace);
+    unawaited(
+      r.response.done.then(
+        (_) => _proxyDiagnostics.responseFinished(trace, error: false),
+        onError: (Object _) =>
+            _proxyDiagnostics.responseFinished(trace, error: true),
+      ),
+    );
     try {
       try {
         await slot.acquire(admission).timeout(const Duration(seconds: 2));
@@ -1113,6 +1197,13 @@ class BtrTransport {
         if (generation == _seekGeneration) _localFailureGeneration = generation;
         _readFailure(generation, 'handler-capacity');
         metrics.event('proxy-rejected', {
+          ..._proxyDiagnostics.rejected(
+            request: requestId,
+            cause: 'execution-timeout',
+            generation: generation,
+            waitMs: metrics.now() - enteredAt,
+            track: parts[1],
+          ),
           'status': 503,
           'reason': 'handler-capacity',
           'activeHandlers': _capacity.active,
@@ -1121,16 +1212,25 @@ class BtrTransport {
         });
         r.response.statusCode = 503;
         r.response.contentLength = 0;
+        trace.serverCloseRequested = true;
+        _proxyDiagnostics.record('close-requested', trace);
         await r.response.close().timeout(const Duration(seconds: 2));
         return;
       }
       if (_retiring || _closed) throw const BtrCancelled();
       _admissions.remove(admission);
-      await tracks[parts[1]]!.serve(r, slot: slot, generation: generation);
+      await tracks[parts[1]]!.serve(
+        r,
+        slot: slot,
+        generation: generation,
+        trace: trace,
+      );
     } catch (_) {
       try {
         r.response.statusCode = 502;
         r.response.contentLength = 0;
+        trace.serverCloseRequested = true;
+        _proxyDiagnostics.record('close-requested', trace);
         await r.response.close().timeout(const Duration(seconds: 2));
       } catch (_) {
         /* disconnected */
@@ -1139,6 +1239,7 @@ class BtrTransport {
       admission.cancel();
       _admissions.remove(admission);
       slot.close();
+      _proxyDiagnostics.released(trace);
     }
   }
 
@@ -1171,6 +1272,7 @@ class BtrTransport {
   }
 
   Map<String, Object?> snapshot() => {
+    'proxyLifecycle': _proxyDiagnostics.snapshot(),
     'activeProxyHandlers': _capacity.active,
     'peakProxyHandlers': _capacity.peak,
     'proxyHandlerLimit': handlerLimit,
