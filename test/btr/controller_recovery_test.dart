@@ -131,7 +131,7 @@ class Player {
   }
   bool isPlayingStateChangeAllowed = false, lateEof = true, failSeek = false, lateOpenEof = false;
   Completer<void>? stopping;
-  bool eofDuringSeek = false;
+  bool eofDuringSeek = false, failStop = false;
   Future<void> Function()? onSeek;
   Future<void> Function()? onOpen;
   Future<void> seek(Duration p) async {
@@ -155,7 +155,7 @@ class Player {
   Future<void> command(List<String> args) async {
     calls.add(args.join(':')); state.playing = args.last == 'no';
   }
-  Future<void> stop() async { calls.add('stop'); await stopping?.future; state.position = Duration.zero; state.completed = false; }
+  Future<void> stop() async { calls.add('stop'); if (failStop) throw StateError('stop failed'); await stopping?.future; state.position = Duration.zero; state.completed = false; }
   Future<void> pause() async { calls.add('pause'); state.playing = false; }
   Future<void> open(Media media, {required bool play}) async { calls.add('open:\${media.start.inSeconds}'); await onOpen?.call(); state.position = media.start; state.playing = play; if (lateOpenEof) state.completed = true; }
 }
@@ -163,10 +163,11 @@ class Transport implements BtrTransport {
   @override dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
   Transport(this.player); final Player player;
   bool currentSeekHasLocalFailure = false;
+  bool seekRequiresPlayerRetirement = false;
   int? currentReadFailureAt;
   final tracks = <String, BtrTrack>{};
   void seek() { currentSeekHasLocalFailure = false; }
-  Future<void> retirePlayerRequests() async { player.calls.add('retire'); }
+  Future<void> retirePlayerRequests() async { player.calls.add('retire'); seekRequiresPlayerRetirement = false; }
   Future<void> close() async { player.calls.add('transport-close'); }
 }
 typedef BtrPlayback = Session;
@@ -713,6 +714,109 @@ Future<void> main() async {
       await transport.close(); await cdn.close();
     }
   }));
+  await scenario('capacity seek stops native consumption before retirement and reloads the exact target', () async {
+    final c = Subject()..wire(); final p = c._videoPlayerController!;
+    p.state..completed = false..playing = true; p.lateEof = false;
+    (c._btrPlayback!.transport as Transport).seekRequiresPlayerRetirement = true;
+    await c.seek(const Duration(seconds: 40));
+    check(p.calls.contains('stop') && p.calls.contains('retire') && p.calls.contains('open:40'), 'capacity seek did not unload before reload');
+    check(p.calls.indexOf('stop') < p.calls.indexOf('retire') && p.calls.indexOf('retire') < p.calls.indexOf('open:40'), 'ownership order violated');
+    check(p.state.position.inSeconds == 40 && p.state.playing, 'target or play intent lost');
+    check(!p.calls.contains('replay:0') && !p.calls.contains('seek:40'), 'capacity path used stale native seek or replay');
+    check(c._btrAutomaticReopens == 0, 'explicit seek spent automatic read retry budget');
+  });
+  await scenario('capacity reload preserves newer seek and explicit pause while stop is pending', () async {
+    for (final pause in [false, true]) {
+      final c = Subject()..wire(); final p = c._videoPlayerController!;
+      p.state..completed = false..playing = true; p.lateEof = false;
+      (c._btrPlayback!.transport as Transport).seekRequiresPlayerRetirement = true;
+      final gate = Completer<void>(); p.stopping = gate;
+      final first = c.seek(const Duration(seconds: 40));
+      await Future<void>.delayed(Duration.zero);
+      try {
+        check(p.calls.contains('stop') && !p.calls.contains('retire'), 'retired before native stop completed');
+        final newer = c.seek(const Duration(seconds: 60));
+        if (pause) { c._seekIntent.requestPlaying(false); await p.pause(); }
+        gate.complete(); await first; await newer;
+        check(p.state.position.inSeconds == 60, 'new target lost during capacity stop');
+        check(p.state.playing == !pause, 'explicit play/pause intent lost');
+        check(p.calls.contains('open:60') && !p.calls.contains('open:40'), 'opened obsolete target');
+        check(p.calls.where((s) => s == 'stop').length == 1, 'unbounded capacity reload');
+      } finally { if (!gate.isCompleted) gate.complete(); await first; }
+    }
+  });
+  await scenario('capacity reload cannot reopen a replaced source or a closed task', () async {
+    for (final close in [false, true]) {
+      final c = Subject()..wire(); final p = c._videoPlayerController!;
+      p.state..completed = false..playing = true; p.lateEof = false;
+      (c._btrPlayback!.transport as Transport).seekRequiresPlayerRetirement = true;
+      final gate = Completer<void>(); p.stopping = gate;
+      final seeking = c.seek(const Duration(seconds: 40));
+      await Future<void>.delayed(Duration.zero);
+      try {
+        check(p.calls.contains('stop'), 'capacity stop was not entered');
+        if (close) c._taskScope.closed = true;
+        else { c._btrOpenGeneration++; c._btrPlayback = Session(p); }
+        gate.complete(); await seeking;
+        check(!p.calls.any((s) => s.startsWith('open:')), 'stale source reopened');
+      } finally { if (!gate.isCompleted) gate.complete(); await seeking; }
+    }
+  });
+  await scenario('failed native stop never retires consumed GETs or opens a second source', () async {
+    final c = Subject()..wire(); final p = c._videoPlayerController!;
+    p.state..completed = false..playing = true; p.lateEof = false; p.failStop = true;
+    (c._btrPlayback!.transport as Transport).seekRequiresPlayerRetirement = true;
+    await c.seek(const Duration(seconds: 40));
+    check(p.calls.length == 1 && p.calls.single == 'stop', 'stop failure retired or reopened valid consumers');
+    check(c._btrPlayback!.metrics.snapshot()['seekCommandFailures'] == 1, 'stop failure was hidden');
+    check(!c._reopening && p.state.playing, 'stop failure corrupted playback ownership');
+  });
+  await scenario('full eight-response capacity remains owned until stop and reload verifies both tracks', () async {
+    final bytes = Uint8List.fromList(List.generate(16 * 1024 * 1024, (i) => i % 251));
+    final cdn = FakeCdn(bytes)..audioBytes = Uint8List.fromList(bytes.map((b) => b ^ 0x55).toList());
+    await cdn.start();
+    final metrics = BtrMetrics(BtrMode.combined), scheduler = BtrScheduler();
+    final transport = BtrTransport(mode: BtrMode.combined, metrics: metrics,
+      scheduler: scheduler, network: FakeNetwork(scheduler, metrics, cdn));
+    final sockets = <Socket>[];
+    final c = Subject()..wire(); final p = c._videoPlayerController!;
+    p.state..completed = false..playing = true; p.lateEof = false;
+    c._btrPlayback!.transport = transport;
+    final gate = Completer<void>(); p.stopping = gate;
+    Future<void>? seeking;
+    try {
+      final urls = await transport.start([for (final kind in ['video', 'audio'])
+        BtrTrackSpec(kind: kind, urls: ['https://origin.bilivideo.com/\$kind.m4s'])]);
+      for (var i = 0; i < 8; i++) {
+        final uri = Uri.parse(urls[i.isEven ? 'video' : 'audio']!);
+        final socket = await Socket.connect(uri.host, uri.port); sockets.add(socket);
+        socket.write('GET \${uri.path} HTTP/1.1\\r\\nHost: \${uri.host}:\${uri.port}\\r\\nRange: bytes=0-\\r\\n\\r\\n');
+        await socket.flush();
+      }
+      await waitUntil(() => transport.snapshot()['openProxyResponses'] == 8);
+      var opened = false;
+      p.onOpen = () async {
+        check(transport.snapshot()['openProxyResponses'] == 0 && scheduler.active == 0 && scheduler.queued == 0, 'reload overtook capacity release');
+        for (final t in transport.snapshot()['tracks'] as List) check(t['orderedReservationBytes'] == 0, 'retirement leaked bytes');
+        final v = await fetchLocal(urls['video']!, range: 'bytes=-100');
+        final a = await fetchLocal(urls['audio']!, range: 'bytes=-100');
+        check(v.length == 100 && a.length == 100, 'reload bytes missing');
+        for (var i = 0; i < 100; i++) check(v[i] == bytes[bytes.length-100+i] && a[i] == (v[i] ^ 0x55), 'track data changed');
+        opened = true;
+      };
+      seeking = c.seek(const Duration(seconds: 40));
+      await Future<void>.delayed(Duration.zero);
+      check(p.calls.contains('stop') && metrics.cancellations == 0 && transport.snapshot()['openProxyResponses'] == 8, 'GETs retired before confirmed stop');
+      gate.complete(); await seeking;
+      check(opened && p.state.playing && p.state.position.inSeconds == 40, 'capacity reload did not resume');
+      check(transport.snapshot()['proxyCapacityRejections'] == 0 && metrics.terminalFailures == 0, 'capacity reload emitted rejection or terminal failure');
+      check(transport.snapshot()['peakProxyHandlers'] == 4 && scheduler.peak <= 16, 'resource limits changed');
+    } finally {
+      if (!gate.isCompleted) gate.complete(); await seeking;
+      c._retryTimer?.cancel(); for (final s in sockets) s.destroy();
+      await transport.close(); await cdn.close();
+    }
+  });
   if (failures.isNotEmpty) throw StateError(failures.join(', '));
 }
 ''');

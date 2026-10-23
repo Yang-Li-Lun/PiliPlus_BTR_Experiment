@@ -1714,7 +1714,43 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
           }
           danmakuController?.clear();
           session?.seek(position);
-          await player.seek(position);
+          final transport = session?.transport;
+          if (!isLive &&
+              transport != null &&
+              transport.seekRequiresPlayerRetirement &&
+              player.current.isNotEmpty) {
+            final media = player.current.last;
+            _reopening = true;
+            session!.metrics.playerOpening(
+              'seek-capacity',
+              position.inMilliseconds,
+            );
+            try {
+              // The native stop establishes that old GETs have no consumers.
+              // A seek generation or blocked write alone cannot establish it.
+              await player.stop();
+              await transport.retirePlayerRequests();
+              if (_taskScope.closed ||
+                  generation != _btrOpenGeneration ||
+                  _btrFailedGeneration == generation ||
+                  !identical(session, _btrPlayback) ||
+                  !identical(player, _videoPlayerController)) {
+                return;
+              }
+              session.readRecovery.reset();
+              await player.open(
+                media.copyWith(start: _seekIntent.pendingTarget ?? position),
+                play: false,
+              );
+              session.metrics.event('player-open-ended', {
+                'outcome': 'command-complete',
+              });
+            } finally {
+              _reopening = false;
+            }
+          } else {
+            await player.seek(position);
+          }
           session?.metrics.seekCommand(
             'command-complete',
             position.inMilliseconds,

@@ -1021,6 +1021,12 @@ class BtrTransport {
   final _admissions = <BtrCancel>{};
   late final BtrProxyDiagnostics _proxyDiagnostics;
   int _nextProxyRequest = 0;
+
+  /// A new native seek can open one GET per track. Only an explicit native
+  /// stop can retire the currently owned responses when that room is absent.
+  bool get seekRequiresPlayerRetirement =>
+      _capacity.responses + tracks.length > BtrProxyCapacity.responseLimit;
+
   Map<String, Object> _proxyCapacityState() => {
     'openResponses': _capacity.responses,
     'responseLimit': BtrProxyCapacity.responseLimit,
