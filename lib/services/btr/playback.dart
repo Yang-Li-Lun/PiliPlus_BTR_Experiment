@@ -6,6 +6,7 @@ import 'package:PiliPlus/http/constants.dart';
 import 'package:PiliPlus/plugin/pl_player/models/data_source.dart';
 import 'package:PiliPlus/services/btr/diagnostics.dart';
 import 'package:PiliPlus/services/btr/buffer_ahead.dart';
+import 'package:PiliPlus/services/btr/local_write_budget.dart';
 import 'package:PiliPlus/services/btr/metrics.dart';
 import 'package:PiliPlus/services/btr/policy.dart';
 import 'package:PiliPlus/services/btr/read_recovery.dart';
@@ -46,8 +47,10 @@ class BtrPlayback {
 
   static Future<(BtrPlayback?, DataSource)> prepare(
     DataSource source,
-    bool live,
-  ) async {
+    bool live, {
+    double? nativeCacheSeconds,
+    double nativePlaybackRate = 1,
+  }) async {
     if (!Platform.isAndroid || live || source is! NetworkSource) {
       return (null, source);
     }
@@ -70,6 +73,10 @@ class BtrPlayback {
       mode: playback.mode,
       metrics: playback.metrics,
       settings: playback.settings,
+      localWriteIdleTimeout: BtrLocalWriteBudget.forNativeCache(
+        cacheSeconds: nativeCacheSeconds,
+        playbackRate: nativePlaybackRate,
+      ),
       headers: {'User-Agent': BrowserUa.pc, 'Referer': HttpString.baseUrl},
     );
     playback.transport = transport;

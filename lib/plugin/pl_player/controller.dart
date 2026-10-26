@@ -949,6 +949,10 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
     final (session, preparedSource) = await BtrPlayback.prepare(
       dataSource,
       isLive,
+      nativeCacheSeconds: dataSource is NetworkSource && !isLive
+          ? double.tryParse(buffer['cache-secs'] ?? '')
+          : null,
+      nativePlaybackRate: playbackSpeed,
     );
     if (!isCurrent() || generation != _btrOpenGeneration || _playerCount == 0) {
       await session?.close();

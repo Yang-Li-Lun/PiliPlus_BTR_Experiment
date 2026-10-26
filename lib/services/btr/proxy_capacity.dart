@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:PiliPlus/services/btr/local_write_budget.dart';
 import 'package:PiliPlus/services/btr/scheduler.dart';
 
 /// Four executing requests; writers lend slots at backpressure or chunk boundaries.
@@ -67,8 +68,10 @@ class BtrProxySlot {
   Future<void> flush(
     Future<void> flushing,
     BtrCancel token, {
+    Duration idleTimeout = BtrLocalWriteBudget.base,
     required void Function() onBlocked,
   }) async {
+    BtrLocalWriteBudget.validate(idleTimeout);
     var blocked = false;
     final timer = Timer(const Duration(milliseconds: 100), () {
       blocked = true;
@@ -78,8 +81,9 @@ class BtrProxySlot {
       onBlocked();
     });
     try {
-      // Preserve the existing response deadline, including suspended time.
-      await token.bind(flushing.timeout(const Duration(seconds: 15)));
+      // Cancellation settles the timed future too, so retired writers do not
+      // leave a long-lived deadline timer retaining their response futures.
+      await token.bind(flushing).timeout(idleTimeout);
     } finally {
       timer.cancel();
       if (blocked) owner.parked--;

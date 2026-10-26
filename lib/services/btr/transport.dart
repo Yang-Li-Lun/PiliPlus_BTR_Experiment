@@ -6,6 +6,7 @@ import 'dart:io';
 import 'dart:math' as math;
 import 'dart:typed_data';
 
+import 'package:PiliPlus/services/btr/local_write_budget.dart';
 import 'package:PiliPlus/services/btr/metrics.dart';
 import 'package:PiliPlus/services/btr/network.dart';
 import 'package:PiliPlus/services/btr/policy.dart';
@@ -342,14 +343,15 @@ class BtrTrack {
           sent = true;
           response.add(bytes);
           if (slot == null) {
-            await token.bind(
-              response.flush().timeout(const Duration(seconds: 15)),
-            );
+            await token
+                .bind(response.flush())
+                .timeout(owner.localWriteIdleTimeout);
           } else {
             try {
               await slot.flush(
                 response.flush(),
                 token,
+                idleTimeout: owner.localWriteIdleTimeout,
                 onBlocked: () {
                   demand.backpressured = true;
                   demand.rebalance?.call();
@@ -993,11 +995,13 @@ class BtrTransport {
     BtrNetwork? network,
     BtrScheduler? scheduler,
     this.settings = const BtrSettings(),
+    this.localWriteIdleTimeout = BtrLocalWriteBudget.base,
   }) : scheduler =
            scheduler ??
            BtrScheduler(
              limit: settings.autoConcurrency ? 8 : settings.manualThreads,
            ) {
+    BtrLocalWriteBudget.validate(localWriteIdleTimeout);
     if (!settings.autoConcurrency) {
       this.scheduler.limit = settings.manualThreads;
     }
@@ -1012,6 +1016,7 @@ class BtrTransport {
   final BtrMode mode;
   final BtrMetrics metrics;
   final BtrSettings settings;
+  final Duration localWriteIdleTimeout;
   final BtrScheduler scheduler;
   late final BtrNetwork network;
   late final BtrAdaptive adaptive;
@@ -1293,6 +1298,7 @@ class BtrTransport {
     'proxyInvalidRejections': _invalidRejections,
     'proxyRetirementRejections': _retirementRejections,
     'proxyLocalResponseFailures': _localResponseFailures,
+    'localWriteIdleTimeoutMs': localWriteIdleTimeout.inMilliseconds,
     'localReadFailureGeneration': _localFailureGeneration,
     'currentReadFailureKind': _readFailureKind,
     'currentReadFailureAgeMs': _readFailureAt == null
