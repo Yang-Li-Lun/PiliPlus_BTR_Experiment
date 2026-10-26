@@ -41,6 +41,20 @@ abstract final class BtrNativeFailureHint {
       };
     }
     const prefixes = {
+      'url read error: immediate exit requested': 'http-read-interrupted',
+      'error reading http response: immediate exit requested':
+          'http-response-interrupted',
+      'error reading http response: ': 'http-response-read',
+      'url read error: ': 'http-url-read',
+      'stream ends prematurely at ': 'http-short-stream',
+      'unexpected offset: expected ': 'http-offset-mismatch',
+      'invalid chunk size ': 'http-invalid-chunk',
+      'malformed http version string.': 'http-invalid-version',
+      'overlong headers': 'http-header-size',
+      'failed to reconnect at ': 'http-reconnect-failed',
+      'received and expected http method do not match.': 'http-method-mismatch',
+      'received and autodetected http method did not match ':
+          'http-method-mismatch',
       'failed to open': 'open-failed',
       'cannot open ': 'open-failed',
       'error opening input': 'open-failed',

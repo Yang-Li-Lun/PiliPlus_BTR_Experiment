@@ -266,9 +266,16 @@ class BtrMetrics {
         : 'unclassified';
     nativeErrorOrigins.update(origin, (n) => n + 1, ifAbsent: () => 1);
     nativeErrorKinds.update(kind, (n) => n + 1, ifAbsent: () => 1);
+    // Only mpv's fixed libav namespaces; never export an arbitrary child.
+    final component = const {
+      'ffmpeg/audio': 'ffmpeg-audio',
+      'ffmpeg/video': 'ffmpeg-video',
+      'ffmpeg/demuxer': 'ffmpeg-demuxer',
+    }[prefix];
     final detail = <String, Object>{
       'atMs': now() - openedAt,
       'origin': origin,
+      'component': ?component,
       'level': level,
       'readKind': readKind ?? 'unclassified',
       'kind': kind,

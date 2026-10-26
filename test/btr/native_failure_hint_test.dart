@@ -7,6 +7,70 @@ import 'package:matcher/expect.dart';
 import 'package:test_api/scaffolding.dart';
 
 void main() {
+  test('native component hints admit only fixed mpv libav namespaces', () {
+    for (final entry in {
+      'ffmpeg/audio': 'ffmpeg-audio',
+      'ffmpeg/video': 'ffmpeg-video',
+      'ffmpeg/demuxer': 'ffmpeg-demuxer',
+      'ffmpeg/private-host': null,
+      'ffmpeg/video/private-host': null,
+      'other/ffmpeg/video': null,
+    }.entries) {
+      final metrics = BtrMetrics(BtrMode.combined)
+        ..nativeLog(entry.key, 'error', 'unclassified private-message');
+      expect(metrics.firstNativeError?['component'], entry.value);
+      final encoded = jsonEncode(metrics.snapshot());
+      expect(encoded, isNot(contains('private-host')));
+      expect(encoded, isNot(contains('private-message')));
+    }
+  });
+
+  test('HTTP protocol stage hints do not infer status codes or hide errors', () {
+    const cases = {
+      'URL read error: Immediate exit requested': 'http-read-interrupted',
+      'Error reading HTTP response: Immediate exit requested':
+          'http-response-interrupted',
+      'Error reading HTTP response: Connection reset by peer':
+          'http-response-read',
+      'URL read error: Input/output error': 'http-url-read',
+      'Stream ends prematurely at 123, should be 456': 'http-short-stream',
+      'Unexpected offset: expected 123, got 456': 'http-offset-mismatch',
+      'Invalid chunk size 123': 'http-invalid-chunk',
+      'Malformed HTTP version string.': 'http-invalid-version',
+      'overlong headers': 'http-header-size',
+      'Failed to reconnect at 123.': 'http-reconnect-failed',
+      'Received and expected HTTP method do not match. (GET expected, HEAD received)':
+          'http-method-mismatch',
+      'Received and autodetected HTTP method did not match (GET autodetected HEAD received)':
+          'http-method-mismatch',
+    };
+    final metrics = BtrMetrics(BtrMode.combined);
+    for (final entry in cases.entries) {
+      final message =
+          'http: ${entry.key} https://private.invalid/?token=secret';
+      expect(BtrNativeFailureHint.read(message), {'failureHint': entry.value});
+      metrics.nativeLog('ffmpeg/private-child', 'error', message);
+    }
+    expect(metrics.nativeErrorOrigins, {'ffmpeg': cases.length});
+    final encoded = jsonEncode(metrics.snapshot());
+    for (final private in [
+      'private.invalid',
+      'token=',
+      'private-child',
+    ]) {
+      expect(encoded, isNot(contains(private)));
+    }
+    expect(encoded, isNot(contains('reportedHttpStatus')));
+    expect(
+      BtrNativeFailureHint.read(
+        'https://private.invalid/URL read error: Immediate exit requested',
+      ),
+      {
+        'failureHint': 'unclassified',
+      },
+    );
+  });
+
   test(
     'mpv AVClass framing is recognized without retaining component data',
     () {
