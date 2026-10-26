@@ -24,6 +24,8 @@ Player 由 PlaybackTaskScope 登記釋放，AndroidVideoController 將自身 _di
 
 完整 Flutter/native suite 在收集前仍因既有 cnativeapi 缺 Windows MSVC 失敗，不列為 PASS，未安裝或變更全域工具鏈。隔離 harness 一般沙箱曾因 OS 暫存 kernel 複製拒絕而失敗；使用正式 require_escalated 審查後同 harness 通過，沒有變更 TEMP/TMP。SDK／lock／patches 與既有候選雜湊核對一致，僅重用專案 cache，未新增依賴。
 
-本文件建立時 Android APK 尚未建置或安裝，沒有本候選的實機結果。後續驗證必須在同一個有界執行流程內完成開片至關閉，確認 DEV／BV／播放中與足夠緩衝後才送 Seek；任一前置失敗或超過既定 PSS 門檻就關閉，不用播放切換誤觸重開。僅靠本診斷仍不能證實或修正圖形記憶體根因，不提升穩定版本。
+Android ARM64 DEV APK 已建置、驗證與安裝，來源 0489aa468a9b9afae657cd137b863d010ecc385e；R0 正常播放與 R1 三次快速 Seek 均零 playerErrors／額外緩衝／容量拒絕。R1 最後時間軸 1,902 ms，PSS 1,012,194 KiB，解碼種類回報維持 mediacodec；vo error 早於容量重開，沒有足夠證據修改 Surface 重建。完整證據與未通過項目見 BTR_SURFACE_PROBE_DEVICE_RESULT_20261027.md，仍不宣稱圖形記憶體根因已解決或整體目標完成。
+
+實機流程將開片至關閉放在同一次有界執行，確認 DEV／BV／播放中與足夠緩衝後才送 Seek；任一前置失敗或超過既定 PSS 門檻就關閉，不用播放切換誤觸重開。
 
 程式變更：controller.dart、playback.dart、metrics.dart、diagnostics.dart、native_failure_hint.dart，新增 surface_probe.dart、native_property.dart、native_property_string.dart；測試為 surface_probe_test.dart、native_property_string_test.dart 及 native_failure_hint_test.dart。證據在 evidence/surface-probe-20261026-01/。
