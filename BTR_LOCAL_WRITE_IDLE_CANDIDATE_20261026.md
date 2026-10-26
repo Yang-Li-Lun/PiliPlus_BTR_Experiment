@@ -25,7 +25,9 @@ Snapshot 新增 localWriteIdleTimeoutMs，供實機核對實際採用值。沒�
 
 APK：build/btr-candidates/local-write-idle-20261026-01/PiliPlus-BTR-LocalWriteIdle-20261026-01-dev-arm64-v8a.apk。SHA-256：5202f671a9c90e3d72659c24eea5d6e46b3ed7dacb879e6c166e328b0938e866。建置、簽章及安裝證據分別見 evidence/local-write-idle-20261026-01/build.json、apk-verification.json、installed.json。
 
-本候選播放驗收尚未執行。仍需同影片 4K HEVC／1.0X 正常播放短測、快速／一般 Seek 與關閉資源驗證，並核對 timeoutMs=75000。前一診斷版本的人工開片確認不能當成本候選的就緒證據；目前等待本候選手動開片。工具開片仍遭政策拒絕，未改用其他命令繞過。
+同影片 4K HEVC／1.0X 的正常播放、三次快速與一般 Seek 短測已完成，三組均零 playerErrors／額外緩衝／容量 503；實際 snapshot timeoutMs=75000。快速最後恢復 1,733 ms，正常關閉後代理資源歸零。完整結果與限制見 BTR_LOCAL_WRITE_DEVICE_RESULT_20261026.md；尚未通過整體穩定性驗收。
+
+本候選人工交接已確認正常聲畫。工作階段更新至可正式自動審查後，同一條既有授權的 DEV 開片指令經 require_escalated 審查成功，後續開片限制已解除；未使用其他方式繞過原拒絕。
 
 較久的回應保留可能讓一般 Seek 更早碰到既有八回應邊界；必須量測 stop／retire 的實際成本，不能以零 503 就宣稱改善。有限期限不能被解讀為消費者失效的證據；任意長暫停、載入後變速及其他緩衝設定仍未實機驗收。C1 的過早 Seek 恢復時間軸未在本候選改動，既有一次緩衝仍如實保留，不為取得綠燈調整計數。
 
