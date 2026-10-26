@@ -8,6 +8,77 @@ import 'package:test_api/scaffolding.dart';
 
 void main() {
   test(
+    'mpv AVClass framing is recognized without retaining component data',
+    () {
+      for (final component in [
+        'https',
+        'http',
+        'tcp',
+        'tls',
+        'mediacodec',
+        'hevc_mediacodec',
+        'h264_mediacodec',
+        'AVIOContext',
+        'AVHWDeviceContext',
+      ]) {
+        expect(
+          BtrNativeFailureHint.read(
+            '$component: HTTP error 403 https://secret.invalid/?token=private',
+          ),
+          {'failureHint': 'reported-http-status', 'reportedHttpStatus': 403},
+        );
+      }
+      final metrics = BtrMetrics(BtrMode.combined)
+        ..nativeLog(
+          'ffmpeg/video',
+          'error',
+          'hevc_mediacodec: Failed to release output buffer private-name',
+        );
+      expect(metrics.nativeErrorOrigins, {'ffmpeg': 1});
+      expect(metrics.firstNativeError?['failureHint'], 'codec-release-output');
+      final encoded = jsonEncode(metrics.snapshot());
+      expect(encoded, isNot(contains('hevc_mediacodec')));
+      expect(encoded, isNot(contains('private-name')));
+      for (final unknown in [
+        'private-host: HTTP error 403',
+        'https: https: HTTP error 403',
+        'https://secret.invalid/HTTP error 403',
+        'https:HTTP error 403',
+      ]) {
+        expect(BtrNativeFailureHint.read(unknown), {
+          'failureHint': 'unclassified',
+        });
+      }
+    },
+  );
+
+  test('AImageReader stages retain only a bounded reported status number', () {
+    const cases = {
+      'newWithUsage failed: ': 'android-image-create',
+      'getWindow failed: ': 'android-image-window',
+      'acquireLatestImage failed: ': 'android-image-acquire',
+      'getHardwareBuffer failed: ': 'android-image-buffer',
+    };
+    for (final entry in cases.entries) {
+      expect(BtrNativeFailureHint.read('${entry.key}-30001 private-address'), {
+        'failureHint': entry.value,
+        'reportedMediaStatus': -30001,
+      });
+      for (final malformed in ['-3000100', 'secret', '12private', '--12']) {
+        expect(BtrNativeFailureHint.read('${entry.key}$malformed'), {
+          'failureHint': entry.value,
+        });
+      }
+    }
+    expect(
+      BtrNativeFailureHint.read(
+        'https://private.invalid/acquireLatestImage failed: -30001',
+      ),
+      {'failureHint': 'unclassified'},
+    );
+  });
+
+  test(
     'native video literals distinguish stages without exporting suffixes',
     () {
       const cases = {

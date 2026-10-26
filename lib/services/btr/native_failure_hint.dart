@@ -2,8 +2,34 @@
 /// Never retain URLs, file names, addresses or arbitrary message suffixes.
 abstract final class BtrNativeFailureHint {
   static Map<String, Object> read(String message) {
-    final text = (message.length > 256 ? message.substring(0, 256) : message)
+    var text = (message.length > 256 ? message.substring(0, 256) : message)
         .trimLeft();
+    // mpv's av_log adapter prepends an AVClass item name, separate from the
+    // mpv log namespace. Strip one known component, never an arbitrary label.
+    text = text.replaceFirst(
+      RegExp(
+        r'^(?:https?|tcp|tls|mediacodec|hevc_mediacodec|h264_mediacodec|AVIOContext|AVHWDeviceContext):[ \t]+',
+        caseSensitive: false,
+      ),
+      '',
+    );
+    const imageStages = {
+      'newwithusage failed: ': 'android-image-create',
+      'getwindow failed: ': 'android-image-window',
+      'acquirelatestimage failed: ': 'android-image-acquire',
+      'gethardwarebuffer failed: ': 'android-image-buffer',
+    };
+    final lower = text.toLowerCase();
+    for (final entry in imageStages.entries) {
+      if (!lower.startsWith(entry.key)) continue;
+      final status = RegExp(
+        r'^(-?[0-9]{1,6})(?:\s|$)',
+      ).firstMatch(lower.substring(entry.key.length));
+      return {
+        'failureHint': entry.value,
+        if (status != null) 'reportedMediaStatus': int.parse(status.group(1)!),
+      };
+    }
     final http = RegExp(
       r'^(?:HTTP error|Server returned) ([1-5][0-9]{2})(?:\s|$)',
       caseSensitive: false,
@@ -14,7 +40,6 @@ abstract final class BtrNativeFailureHint {
         'reportedHttpStatus': int.parse(http.group(1)!),
       };
     }
-    final lower = text.toLowerCase();
     const prefixes = {
       'failed to open': 'open-failed',
       'cannot open ': 'open-failed',
