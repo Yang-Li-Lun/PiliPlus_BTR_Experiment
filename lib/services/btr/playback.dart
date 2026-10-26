@@ -170,7 +170,7 @@ class BtrPlayback {
         reportTerminal();
       }),
     );
-    if (transport != null) {
+    if (transport != null || const bool.fromEnvironment('BTR_DEVICE_TEST')) {
       _subscriptions.add(
         player.stream.log.listen((log) {
           metrics.nativeLog(log.prefix, log.level, log.text);

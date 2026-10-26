@@ -47,6 +47,7 @@ abstract final class BtrDiagnostics {
     'request-failed',
     'player-error',
     'native-error-origin',
+    'buffering-transition',
     'seek',
     'seek-command',
     'player-open',

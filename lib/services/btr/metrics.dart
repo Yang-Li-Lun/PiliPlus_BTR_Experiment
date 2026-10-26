@@ -1,5 +1,6 @@
 import 'dart:collection';
 
+import 'package:PiliPlus/services/btr/native_failure_hint.dart';
 import 'package:PiliPlus/services/btr/policy.dart';
 import 'package:PiliPlus/services/btr/read_recovery.dart';
 
@@ -262,6 +263,7 @@ class BtrMetrics {
       'level': level,
       'readKind': readKind ?? 'unclassified',
       'kind': kind,
+      ...BtrNativeFailureHint.read(text),
     };
     if (firstNativeError == null) nativeAvAtFirstError = nativeAvProbe;
     nativeAvAtLastError = nativeAvProbe;
@@ -286,12 +288,20 @@ class BtrMetrics {
         : 'other';
     event('player-error', {
       'category': category,
+      ...BtrNativeFailureHint.read(message),
       'transportTerminal': transportTerminal,
       'seekPending': _seekAt != null,
     });
   }
 
   void buffering(bool value) {
+    if (_buffering != value) {
+      event('buffering-transition', {
+        'buffering': value,
+        'seekPending': _seekAt != null,
+        'startupComplete': startupMs != null,
+      });
+    }
     if (value && _buffering != true && startupMs != null && _seekAt == null) {
       bufferingEvents++;
     }
