@@ -936,6 +936,11 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
   ) async {
     final generation = ++_btrOpenGeneration;
     final previousBtr = _btrPlayback;
+    if (previousBtr?.transport != null) {
+      // Keep the old HTTP responses alive until native consumption has stopped.
+      // A failed stop must leave their owner intact instead of truncating GETs.
+      await _videoPlayerController?.stop();
+    }
     _btrPlayback = null;
     await previousBtr?.close();
     if (_taskScope.closed || !isCurrent() || generation != _btrOpenGeneration) {
