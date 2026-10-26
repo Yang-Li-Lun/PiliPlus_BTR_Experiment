@@ -27,6 +27,8 @@ APK：build/btr-candidates/local-write-idle-20261026-01/PiliPlus-BTR-LocalWriteI
 
 同影片 4K HEVC／1.0X 的正常播放、三次快速與一般 Seek 短測已完成，三組均零 playerErrors／額外緩衝／容量 503；實際 snapshot timeoutMs=75000。快速最後恢復 1,733 ms，正常關閉後代理資源歸零。完整結果與限制見 BTR_LOCAL_WRITE_DEVICE_RESULT_20261026.md；尚未通過整體穩定性驗收。
 
+後續低供應速率條件下原始／BTR 均有緩衝，切換 Wi-Fi 後正常播放恢復，但快速 Seek 再次超過記憶體停止門檻；另有測試時窗超時與無效原始對照，均保留於 BTR_LOW_SUPPLY_AND_WIFI_RESULT_20261026.md。早先成功短測不能取代這些後續失敗或當作全面穩定性通過。
+
 本候選人工交接已確認正常聲畫。工作階段更新至可正式自動審查後，同一條既有授權的 DEV 開片指令經 require_escalated 審查成功，後續開片限制已解除；未使用其他方式繞過原拒絕。
 
 較久的回應保留可能讓一般 Seek 更早碰到既有八回應邊界；必須量測 stop／retire 的實際成本，不能以零 503 就宣稱改善。有限期限不能被解讀為消費者失效的證據；任意長暫停、載入後變速及其他緩衝設定仍未實機驗收。C1 的過早 Seek 恢復時間軸未在本候選改動，既有一次緩衝仍如實保留，不為取得綠燈調整計數。
