@@ -30,6 +30,10 @@ abstract final class BtrNativeFailureHint {
       'could not find codec parameters': 'codec-parameters',
       'could not open codec': 'codec-open',
       'failed to initialize a video decoder': 'decoder-init',
+      'native_window_api_connect returned an error': 'surface-connect',
+      'failed to create surface': 'surface-create',
+      'failed to initialize video output': 'video-output-init',
+      'hardware decoding failed': 'hardware-decode-failed',
       'generic error in an external library': 'external-library',
       'end of file': 'end-of-file',
     };

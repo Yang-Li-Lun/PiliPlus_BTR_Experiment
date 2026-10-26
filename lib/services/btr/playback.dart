@@ -8,6 +8,7 @@ import 'package:PiliPlus/services/btr/diagnostics.dart';
 import 'package:PiliPlus/services/btr/buffer_ahead.dart';
 import 'package:PiliPlus/services/btr/local_write_budget.dart';
 import 'package:PiliPlus/services/btr/metrics.dart';
+import 'package:PiliPlus/services/btr/native_property.dart';
 import 'package:PiliPlus/services/btr/policy.dart';
 import 'package:PiliPlus/services/btr/read_recovery.dart';
 import 'package:PiliPlus/services/btr/settings.dart';
@@ -189,7 +190,14 @@ class BtrPlayback {
       if (_closed) return;
       onReadStall?.call();
       metrics.nativePlayerVolume = player.state.volume;
-      if (transport != null) metrics.sampleNativeAv(player.getProperty);
+      if (transport != null) {
+        metrics.sampleNativeAv(
+          (key) => key == 'hwdec-current'
+              ? BtrNativeProperty.read(player, key)
+              : player.getProperty(key),
+          includeVideoPipeline: const bool.fromEnvironment('BTR_DEVICE_TEST'),
+        );
+      }
       metrics.bufferAheadSeconds = transport != null
           ? BtrBufferAhead.read(
               player.getProperty,

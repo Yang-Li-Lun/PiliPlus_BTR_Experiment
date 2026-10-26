@@ -32,6 +32,8 @@ import 'package:PiliPlus/plugin/pl_player/utils/fullscreen.dart';
 import 'package:PiliPlus/services/service_locator.dart';
 import 'package:PiliPlus/services/btr/playback.dart';
 import 'package:PiliPlus/services/btr/read_recovery.dart';
+import 'package:PiliPlus/services/btr/native_property.dart';
+import 'package:PiliPlus/services/btr/surface_probe.dart';
 import 'package:PiliPlus/services/playback_seek_intent.dart';
 import 'package:PiliPlus/services/playback_source_sequence.dart';
 import 'package:PiliPlus/services/playback_task_scope.dart';
@@ -907,6 +909,24 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
       );
       if (_taskScope.closed) return player;
       _videoController = videoController;
+      if (const bool.fromEnvironment('BTR_DEVICE_TEST')) {
+        final probe = BtrSurfaceProbe();
+        // Appended after the Android controller's surface load/unload hooks.
+        player.onLoadHooks.add(() {
+          if (_taskScope.closed) return;
+          _btrPlayback?.metrics.event(
+            'native-surface-load',
+            probe.loaded((key) => BtrNativeProperty.read(player, key)),
+          );
+        });
+        player.onUnloadHooks.add(() {
+          if (_taskScope.closed) return;
+          _btrPlayback?.metrics.event(
+            'native-surface-unload',
+            probe.unloaded((key) => BtrNativeProperty.read(player, key)),
+          );
+        });
+      }
     } catch (_) {
       await disposePlaybackPlayer(player);
       rethrow;

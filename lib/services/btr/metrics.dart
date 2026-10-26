@@ -79,7 +79,10 @@ class BtrMetrics {
   // Fixed numeric/boolean/allowlisted-driver snapshots only. Unknown or
   // unsupported properties stay null; never read device names or track titles.
   // These observations cannot establish audible sound or rendered Android frames.
-  void sampleNativeAv(String Function(String) read) {
+  void sampleNativeAv(
+    String Function(String) read, {
+    bool includeVideoPipeline = false,
+  }) {
     Object? value(String key, bool boolean) {
       try {
         final raw = read(key);
@@ -143,6 +146,12 @@ class BtrMetrics {
         'mediacodec_embed',
         'null',
       }),
+      if (includeVideoPipeline)
+        'hwdec-current': driver('hwdec-current', {
+          'no',
+          'mediacodec',
+          'mediacodec-copy',
+        }),
     };
   }
 

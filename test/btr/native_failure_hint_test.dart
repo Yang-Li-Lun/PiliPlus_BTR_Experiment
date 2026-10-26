@@ -50,6 +50,11 @@ void main() {
         'Invalid data found when processing input private-file': 'invalid-data',
         'Could not open codec secret-decoder': 'codec-open',
         'Could not find codec parameters private-stream': 'codec-parameters',
+        'native_window_api_connect returned an error: Invalid argument (-22) private-suffix':
+            'surface-connect',
+        'Failed to create surface private-name': 'surface-create',
+        'Failed to initialize video output private-driver': 'video-output-init',
+        'Hardware decoding failed private-codec': 'hardware-decode-failed',
         'End of file private-file': 'end-of-file',
       };
       for (final entry in cases.entries) {

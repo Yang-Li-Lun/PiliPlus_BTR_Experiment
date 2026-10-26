@@ -60,6 +60,8 @@ abstract final class BtrDiagnostics {
     'player-completed',
     'player-completed-suppressed',
     'native-audio-state',
+    'native-surface-load',
+    'native-surface-unload',
     'proxy-rejected',
     'prefetch-reclaimed',
     'native-fallback',
