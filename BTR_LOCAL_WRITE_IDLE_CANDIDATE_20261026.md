@@ -21,7 +21,11 @@ Snapshot 新增 localWriteIdleTimeoutMs，供實機核對實際採用值。沒�
 
 ## 實機待驗收與限制
 
-本文件建立時尚未建置、安裝或驗收本候選。預定 DEV Build ID local-write-idle-20261026-01，需要同影片 4K HEVC／1.0X 正常播放短測、快速／一般 Seek 與關閉資源驗證，並核對 timeoutMs=75000。
+來源 f33097956ce5d8a45531bdb435e33aaecea91072 的 ARM64 DEV APK 已建置並安裝至唯一識別的 POCO M2012K11AG（4138ece6），Build ID local-write-idle-20261026-01。包名 com.example.piliplus.btr.experiment.dev、既有 DEV 簽章與權限均核對一致，安裝保留資料，手機 base.apk 雜湊符合交付檔。
+
+APK：build/btr-candidates/local-write-idle-20261026-01/PiliPlus-BTR-LocalWriteIdle-20261026-01-dev-arm64-v8a.apk。SHA-256：5202f671a9c90e3d72659c24eea5d6e46b3ed7dacb879e6c166e328b0938e866。建置、簽章及安裝證據分別見 evidence/local-write-idle-20261026-01/build.json、apk-verification.json、installed.json。
+
+本候選播放驗收尚未執行。仍需同影片 4K HEVC／1.0X 正常播放短測、快速／一般 Seek 與關閉資源驗證，並核對 timeoutMs=75000。前一診斷版本的人工開片確認不能當成本候選的就緒證據；目前等待本候選手動開片。工具開片仍遭政策拒絕，未改用其他命令繞過。
 
 較久的回應保留可能讓一般 Seek 更早碰到既有八回應邊界；必須量測 stop／retire 的實際成本，不能以零 503 就宣稱改善。有限期限不能被解讀為消費者失效的證據；任意長暫停、載入後變速及其他緩衝設定仍未實機驗收。C1 的過早 Seek 恢復時間軸未在本候選改動，既有一次緩衝仍如實保留，不為取得綠燈調整計數。
 
