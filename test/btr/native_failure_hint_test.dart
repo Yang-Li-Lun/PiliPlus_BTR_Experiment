@@ -8,6 +8,59 @@ import 'package:test_api/scaffolding.dart';
 
 void main() {
   test(
+    'native video literals distinguish stages without exporting suffixes',
+    () {
+      const cases = {
+        'Error opening/initializing the VO window.': 'video-output-window',
+        'Failed to create ANativeWindow': 'native-window-create',
+        'Could not choose EGLConfig for private-driver!': 'egl-config',
+        'Could not create EGL context for private-driver (error=-1)!':
+            'egl-context',
+        'Could not create EGL surface!': 'egl-surface',
+        'EGL failed to initialize.': 'egl-init',
+        'Failed loading EGL functions - double check EGLDisplay?':
+            'egl-functions',
+        'Initializing texture for hardware decoding failed.':
+            'hwdec-texture-init',
+        'Mapping hardware decoded surface failed.': 'hwdec-surface-map',
+        'Failed mapping hwdec frame? Open a bug!': 'hwdec-frame-map',
+        'Could not copy back hardware decoded frame.': 'hwdec-copy-back',
+        'Could not copy hardware frame to CPU memory.': 'hwdec-copy-cpu',
+        'Ran out of free frames!': 'frame-pool-exhausted',
+        'Failed to flush codec': 'codec-flush',
+        'Failed to dequeue input buffer (status=-1)': 'codec-dequeue-input',
+        'Failed to dequeue output buffer (status=-1)': 'codec-dequeue-output',
+        'Failed to queue input buffer (status = -1)': 'codec-queue-input',
+        'Failed to release output buffer': 'codec-release-output',
+        'release output buffer failed, -1': 'codec-release-output',
+        'releaseOutputBufferAtTime failed, -1': 'codec-release-timed-output',
+        'Failed to retrieve first frame': 'first-frame-retrieve',
+        'Failed presenting frame!': 'frame-present',
+        'Failed rendering frame!': 'frame-render',
+        'Failed uploading frame!': 'frame-upload',
+        'Failed uninitializing buffer, leaking resources!': 'buffer-uninit',
+        'Failed uninitializing texture, leaking resources!': 'texture-uninit',
+      };
+      for (final entry in cases.entries) {
+        final message =
+            '${entry.key} https://private.invalid/?token=secret 0x1234';
+        for (final variant in [message, message.toUpperCase(), '  $message']) {
+          expect(BtrNativeFailureHint.read(variant), {
+            'failureHint': entry.value,
+          });
+        }
+        // A quoted message inside an arbitrary URL is not a native hint.
+        expect(
+          BtrNativeFailureHint.read('https://private.invalid/${entry.key}'),
+          {
+            'failureHint': 'unclassified',
+          },
+        );
+      }
+    },
+  );
+
+  test(
     'native reported HTTP status is retained without arbitrary suffixes',
     () {
       for (final status in [400, 403, 404, 408, 429, 500, 503]) {
