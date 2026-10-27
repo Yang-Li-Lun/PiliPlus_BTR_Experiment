@@ -70,8 +70,8 @@ $run = Join-Path $repo "evidence/upstream-sync/$RunId"
 $candidate = "codex/btr-update-$RunId"
 $worktree = Join-Path $workspace ".btr-wt/$RunId"
 $restoreTag = "btr-pre-sync-$RunId"
-$toolPaths = @('AGENTS.md','BTR_UPSTREAM.md','BTR_DEVELOPMENT_INDEX.md','tool')
 $toolCommit = Ref 'HEAD'
+$toolPaths = @('AGENTS.md','tool') + @(InvokeRepoGit @('ls-tree','--name-only',$toolCommit) | Where-Object { $_ -like 'BTR_*.md' })
 $carryTools = IsAncestor $source $toolCommit
 if (!$carryTools -and !(IsAncestor $toolCommit $source)) { throw 'Tooling and source diverged; review from the current maintenance candidate' }
 if ($carryTools -and @(InvokeRepoGit (@('status','--porcelain=v1','--') + $toolPaths)).Count) {

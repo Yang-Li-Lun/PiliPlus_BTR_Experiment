@@ -23,7 +23,7 @@
 | DEV certificate SHA-256 | fc32b2cbc48673d7f110c98acfcf360bb9a0d5bc166ecfeeeb2bd33935c22264 |
 | 歷史穩定基準 | 788faa8abee2ff325205d89a9fa24869821685e3，未移動 |
 
-本報告的提交只增加文件；可執行程式碼與上述建置 commit 相同。
+後續維護工具與報告提交不改變 APK 應用程式碼；應用程式碼與上述建置 commit 相同。
 [產物清單](build/btr-candidates/upstream-20261027-01/artifact.json) 包含完整 SHA、路徑與驗收分類。
 APK 原件與交付副本雜湊相同；實際讀取舊暫用 APK 與新 APK 的 certificate，二者相同且都驗章成功。
 
@@ -88,7 +88,7 @@ btr_prepare 改為核對實際 .fvmrc 與 package_config 的 material_ui 版本�
 | 驗證 | 結果 | 證據（本候選相對路徑） |
 | --- | --- | --- |
 | Git 祖先與功能結構 | PASS；包含 55fd、架構來源與官方 main；61 檔與來源一致 | evidence/upstream-20261027/feature-final.log |
-| 同步工具 | 19 個安全斷言 PASS；含舊維護線防退版、接受與未接受來源、髒檔保留、重複 run、衝突及上游歷史改寫拒絕 | evidence/upstream-20261027/sync-tests-final.log |
+| 同步工具 | 19 個安全斷言 PASS；含舊維護線防退版、接受與未接受來源、髒檔保留、重複 run、衝突及上游歷史改寫拒絕 | evidence/upstream-20261027/sync-tests-document-carry-final.log |
 | 純 Dart／本機 Fake CDN | 168/168 PASS；含真實 controller 方法的 deterministic fixture、Seek/恢復/取消、原始模式、設定、同 ETag 不同 CDN bytes、容量與清理 | evidence/upstream-20261027/dart-tests-02.log |
 | 靜態分析 lib/test | 0 errors／0 warnings／40 infos，exit 0；包含既有提示及本次測試檔一項字串插值提示 | evidence/upstream-20261027/analyze-app-03.log |
 | 診斷 Flutter channel | 10/10 PASS，mock channel | evidence/upstream-20261027/diagnostics-flutter-02.log |
