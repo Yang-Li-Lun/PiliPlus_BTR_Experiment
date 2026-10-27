@@ -1,5 +1,7 @@
 # BTR 上游同步
 
+目前維護架構與首次更新候選見 [2026-10-27 交付紀錄](BTR_MAINTENANCE_RESULT_20261027.md)；暫用版本仍依既有版本清單。
+
 唯一持續同步的上游是 PiliPlus 官方 main：https://github.com/bggRGjQaUbCoE/PiliPlus.git。
 Android BTR 為本專案自行維護，不追蹤或自動移植 Bilibili-thread-ripper 更新；原 MIT notices 保留。
 
