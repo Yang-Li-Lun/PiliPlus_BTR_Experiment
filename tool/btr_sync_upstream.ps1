@@ -3,6 +3,8 @@
 param(
     [string]$RepositoryRoot = (Split-Path $PSScriptRoot -Parent),
     [string]$SourceRef,
+    [string]$AcceptCandidate,
+    [string]$AcceptanceNote,
     [string]$RunId = (Get-Date -Format 'yyyyMMdd-HHmmss-fff')
 )
 $ErrorActionPreference = 'Stop'
@@ -24,17 +26,57 @@ if (@(InvokeRepoGit @('rev-parse', '--show-toplevel'))[0].Replace('\','/') -ne $
     throw 'RepositoryRoot must be the checkout root'
 }
 $config = Get-Content -LiteralPath (Join-Path $repo 'tool/btr_upstream.json') -Raw | ConvertFrom-Json
-if ($config.schemaVersion -ne 1) { throw 'Unknown sync configuration schema' }
-if (!$SourceRef) { $SourceRef = $config.maintenanceBranch }
+if ($config.schemaVersion -ne 2) { throw 'Unknown sync configuration schema; use the current candidate tooling' }
+function HasRef([string]$Name) {
+    & git -C $repo show-ref --verify --quiet $Name
+    if ($LASTEXITCODE -gt 1) { throw "Cannot inspect ref: $Name" }
+    return $LASTEXITCODE -eq 0
+}
+if ($config.acceptedSource -notlike 'refs/heads/codex/btr-accepted*') { throw 'Invalid accepted-source ref' }
+$acceptedExists = HasRef $config.acceptedSource
+$accepted = if ($acceptedExists) { Ref $config.acceptedSource } else { Ref $config.bootstrapSource }
+if (!(IsAncestor $config.requiredFeatures $accepted)) { throw 'Accepted source lacks required BTR baseline' }
+if ($AcceptCandidate) {
+    if ($SourceRef -or [string]::IsNullOrWhiteSpace($AcceptanceNote)) { throw 'Acceptance requires a user decision note and no SourceRef' }
+    $next = Ref $AcceptCandidate
+    if (!(IsAncestor $accepted $next)) { throw 'Accepted source must advance without dropping accepted history' }
+    if ((Ref 'HEAD') -ne $next -or @(InvokeRepoGit @('status','--porcelain=v1','--untracked-files=all')).Count) {
+        throw 'Run acceptance from the clean, reviewed candidate checkout at its exact commit'
+    }
+    if ("branch $($config.acceptedSource)" -in @(InvokeRepoGit @('worktree','list','--porcelain'))) { throw 'Accepted source is checked out; leave that worktree untouched' }
+    $receipt = Join-Path $repo "evidence/source-acceptance/$RunId.json"
+    if (Test-Path -LiteralPath $receipt) { throw 'Acceptance receipt already exists' }
+    New-Item -ItemType Directory -Force -Path (Split-Path $receipt) | Out-Null
+    $record = @{ previous=$accepted; candidate=$next; note=$AcceptanceNote; state='PREPARED'; deviceAcceptance='Not implied by source acceptance' }
+    $record | ConvertTo-Json | Set-Content -LiteralPath $receipt
+    $expected = if ($acceptedExists) { $accepted } else { '0' * 40 }
+    InvokeRepoGit @('update-ref', $config.acceptedSource, $next, $expected) | Out-Null
+    $record.state='ACCEPTED'
+    $record | ConvertTo-Json | Set-Content -LiteralPath $receipt
+    Write-Output "Accepted maintenance source: $next; recommendation and stable refs unchanged"
+    return
+}
+if ($AcceptanceNote) { throw 'AcceptanceNote requires AcceptCandidate' }
+if (!$SourceRef) { $SourceRef = if ($acceptedExists) { $config.acceptedSource } else { $config.bootstrapSource } }
 $source = Ref $SourceRef
 $stable = Ref $config.stableBranch
-if (!(IsAncestor $config.initialFeatures $source)) {
-    throw 'Source does not contain the required BTR feature baseline'
+if (!(IsAncestor $config.requiredFeatures $source) -or !(IsAncestor $accepted $source)) {
+    throw 'Source does not contain the required and accepted BTR feature history'
 }
+# Always make sibling worktrees under the repository, even when invoked from a candidate.
+$common = @(InvokeRepoGit @('rev-parse','--path-format=absolute','--git-common-dir'))[0]
+$workspace = Split-Path $common -Parent
 $run = Join-Path $repo "evidence/upstream-sync/$RunId"
 $candidate = "codex/btr-update-$RunId"
-$worktree = Join-Path $repo ".btr-wt/$RunId"
+$worktree = Join-Path $workspace ".btr-wt/$RunId"
 $restoreTag = "btr-pre-sync-$RunId"
+$toolPaths = @('AGENTS.md','BTR_UPSTREAM.md','BTR_DEVELOPMENT_INDEX.md','tool')
+$toolCommit = Ref 'HEAD'
+$carryTools = IsAncestor $source $toolCommit
+if (!$carryTools -and !(IsAncestor $toolCommit $source)) { throw 'Tooling and source diverged; review from the current maintenance candidate' }
+if ($carryTools -and @(InvokeRepoGit (@('status','--porcelain=v1','--') + $toolPaths)).Count) {
+    throw 'Commit current maintenance tooling before syncing'
+}
 foreach ($path in @($run, $worktree)) {
     if (Test-Path -LiteralPath $path) { throw "Refusing to reuse existing path: $path" }
 }
@@ -45,7 +87,8 @@ foreach ($name in @("refs/heads/$candidate", "refs/tags/$restoreTag")) {
 }
 New-Item -ItemType Directory -Path $run | Out-Null
 $report = [ordered]@{
-    schemaVersion=1; state='STARTED'; sourceRef=$SourceRef; sourceCommit=$source
+    schemaVersion=2; state='STARTED'; sourceRef=$SourceRef; sourceCommit=$source
+    acceptedSource=$accepted; requiredFeatures=$config.requiredFeatures
     stableCommit=$stable; upstreamCommit=$null; upstreamBase=$null
     candidateBranch=$candidate; worktree=$worktree; restoreTag=$restoreTag
     candidateCommit=$null; conflicts=@(); deviceAcceptance='UNRESOLVED / NOT RUN'
@@ -85,6 +128,18 @@ try {
         InvokeRepoGit @('update-ref', $mirrorRef, $upstream, ('0' * 40)) | Out-Null
     }
     InvokeRepoGit @('worktree', 'add', '--no-track', '-b', $candidate, $worktree, $source) | Out-Null
+    # Carry the current sync policy/tools even when bootstrapping from an older
+    # accepted source. The caller must contain that source and have clean tools.
+    if ($carryTools) {
+    $existingToolPaths = @(& git -C $repo ls-tree --name-only $toolCommit -- @toolPaths)
+    & git -C $worktree restore --source=$toolCommit --staged --worktree -- @existingToolPaths
+    if ($LASTEXITCODE) { throw 'Cannot carry current maintenance tooling' }
+    & git -C $worktree diff --cached --quiet
+    if ($LASTEXITCODE -eq 1) {
+        & git -C $worktree -c user.name=Codex -c user.email=codex@local.invalid commit -m "Carry maintenance tooling from $toolCommit"
+        if ($LASTEXITCODE) { throw 'Cannot commit maintenance tooling' }
+    } elseif ($LASTEXITCODE) { throw 'Cannot compare tooling' }
+    }
     $mergeOutput = @(& git -C $worktree -c core.longpaths=true -c user.name=Codex -c user.email=codex@local.invalid merge --no-ff --no-commit $upstream 2>&1)
     $mergeExit = $LASTEXITCODE
     $mergeOutput | Set-Content -LiteralPath (Join-Path $run 'merge.log')

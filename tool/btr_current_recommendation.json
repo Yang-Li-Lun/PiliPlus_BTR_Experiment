@@ -1,0 +1,52 @@
+{
+  "schema": 1,
+  "updatedDate": "2026-10-27",
+  "timezone": "Asia/Taipei",
+  "status": "provisional-user-trial",
+  "userDecision": "此版本可先使用",
+  "overallAcceptance": "NOT_ACHIEVED",
+  "formalRelease": false,
+  "sourceCommit": "55fd75e41ae518c0330a11ea646ddf8b8b2bcae2",
+  "sourceTag": "btr-user-trial-20261027-55fd75e41",
+  "stableBaselineCommit": "788faa8abee2ff325205d89a9fa24869821685e3",
+  "buildId": "http-stop-diag-20261027-01",
+  "packageId": "com.example.piliplus.btr.experiment.dev",
+  "abi": "arm64-v8a",
+  "apk": {
+    "path": ".btr-wt/sp-1026-01/build/btr-candidates/http-stop-diag-20261027-01/PiliPlus-BTR-HttpStopDiag-20261027-01-dev-arm64-v8a.apk",
+    "bytes": 24539943,
+    "sha256": "7045264a52354ef213332d495a81b84003466c40aedb4817ea48b10a691579cf",
+    "signerCertificateSha256": "fc32b2cbc48673d7f110c98acfcf360bb9a0d5bc166ecfeeeb2bd33935c22264"
+  },
+  "pathsAreRelativeTo": "repository-root",
+  "dataRetention": "APK, evidence and worktree paths are local and ignored by Git; preserve them separately from Git commits.",
+  "index": "BTR_DEVELOPMENT_INDEX.md",
+  "humanValidation": {
+    "deviceModel": "POCO M2012K11AG",
+    "video": "BV1kUpsedE4R",
+    "quality": "4K HEVC",
+    "speed": "1.0X",
+    "rounds": [
+      {"name": "rapid-observed", "seekIntervalsMs": [897, 978], "lastSeekTimelineMs": 1876, "proxyCapacityRejections": 0, "playerErrors": 0, "extraBufferingEvents": 0, "humanAvRecoveryConfirmed": true},
+      {"name": "rapid-denser", "seekIntervalsMs": [559, 583], "lastSeekTimelineMs": 2203, "proxyCapacityRejections": 0, "playerErrors": 0, "extraBufferingEvents": 0, "humanAvRecoveryConfirmed": true}
+    ],
+    "scope": "Two bounded short runs; timeline metric is not exact first-frame or audible-start latency.",
+    "report": ".btr-wt/sp-1026-01/BTR_RAPID_SEEK_HUMAN_CONFIRM_20261027.md",
+    "evidence": "evidence/rapid-seek-human-confirm-20261027-01",
+    "evidenceManifest": "evidence/rapid-seek-human-confirm-20261027-01/manifest.sha256.json"
+  },
+  "unresolved": [
+    "Native ffmpeg and ImageReader interruption causes and producer identity",
+    "Native and GPU resource ownership and bounds under repeated seeks",
+    "No general speed advantage over original mode established",
+    "Long-duration playback not tested or accepted"
+  ],
+  "acceptanceGapReport": ".btr-wt/ip-1027-01/BTR_ACCEPTANCE_GAPS_20261027.md",
+  "preservedCandidates": [
+    {"sourceCommit": "e674fff04a6be6ffe1a4a7aeeb97b9828e4db343", "status": "NOT_ADOPTED", "purpose": "bounded preview cache", "apkPath": ".btr-wt/sp-1026-01/build/btr-candidates/preview-cache-20261027-01/PiliPlus-BTR-PreviewCache-20261027-01-dev-arm64-v8a.apk"},
+    {"sourceCommit": "3e45cb1a0311084c7682c7b3579a51d1ec3beab2", "status": "NOT_ADOPTED", "purpose": "explicit image descriptor disposal", "apkPath": ".btr-wt/sp-1026-01/build/btr-candidates/preview-descriptor-20261027-01/PiliPlus-BTR-PreviewDescriptor-20261027-01-dev-arm64-v8a.apk"},
+    {"sourceCommit": "4d0812b1b3dc18dfd19783ecd7433117c2257b4d", "status": "OFFLINE_REJECTED_NO_APK", "purpose": "finite HTTP response window", "report": ".btr-wt/rw-1027-01/BTR_RESPONSE_WINDOW_OFFLINE_RESULT_20261027.md"},
+    {"sourceCommit": "b195327e45259d34978577c0a3c6102af2566a34", "status": "DIAGNOSTIC_ONLY", "purpose": "weak image handle ownership probe", "apkPath": ".btr-wt/ip-1027-01/build/btr-candidates/preview-owner-probe-20261027-01/PiliPlus-BTR-PreviewOwnerProbe-20261027-01-dev-arm64-v8a.apk"},
+    {"sourceCommit": "063da6010f89d7720e854cb1ff539567fe77f10c", "status": "CONTROL_NOT_FOR_USE", "purpose": "capacity retirement ablation", "apkPath": ".btr-wt/sp-1026-01/build/btr-candidates/capacity-ablation-20261027-01/PiliPlus-BTR-CONTROL-NOT-FOR-USE-CapacityAblation-20261027-01-dev-arm64-v8a.apk"}
+  ]
+}

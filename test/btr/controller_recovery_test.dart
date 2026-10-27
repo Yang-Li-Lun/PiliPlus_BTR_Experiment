@@ -38,9 +38,12 @@ void main() {
     final root = Directory.current.path.endsWith('btr_tests')
         ? Directory.current.parent.parent
         : Directory.current;
-    final source = File(
+    final controllerSource = File(
       Platform.environment['BTR_CONTROLLER_SOURCE'] ??
           '${root.path}/lib/plugin/pl_player/controller.dart',
+    ).readAsStringSync();
+    final source = controllerSource + '\n' + File(
+      '${root.path}/lib/services/btr/player_integration.dart',
     ).readAsStringSync();
     final seek = method(source, 'Future<void> seek(');
     final play = method(source, 'Future<void> play({');

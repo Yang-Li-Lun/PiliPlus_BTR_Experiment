@@ -27,16 +27,17 @@ if ($LASTEXITCODE) { throw 'Cannot create local bare fixture' }
 & git clone $remote $owner
 if ($LASTEXITCODE) { throw 'Cannot create owner fixture' }
 G $owner @('switch', '-c', 'codex/btr-maintenance') | Out-Null
-$config = @{schemaVersion=1;upstreamUrl=$remote;upstreamRemote='upstream';upstreamBranch='main';upstreamMirror='codex/upstream-piliplus';maintenanceBranch='codex/btr-maintenance';stableBranch='codex/btr-stable';initialFeatures=$base}
+$config = @{schemaVersion=2;upstreamUrl=$remote;upstreamRemote='upstream';upstreamBranch='main';upstreamMirror='codex/upstream-piliplus';bootstrapSource='refs/tags/trial';acceptedSource='refs/heads/codex/btr-accepted';stableBranch='codex/btr-stable';requiredFeatures=$base}
 $config | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $owner 'tool/btr_upstream.json')
 Commit $owner 'BTR tooling'
 G $owner @('branch', 'codex/btr-stable') | Out-Null
 $source = @(G $owner @('rev-parse', 'HEAD'))[0]
+G $owner @('tag','trial',$source) | Out-Null
 G $producer @('remote', 'add', 'upstream', $remote) | Out-Null
 'upstream change' | Set-Content -LiteralPath (Join-Path $producer 'shared.txt')
 Commit $producer 'new upstream'
 G $producer @('push', 'upstream', 'main') | Out-Null
-'dirty tracked owner work' | Set-Content -LiteralPath (Join-Path $owner 'tool/fixture.txt')
+'dirty tracked owner work' | Set-Content -LiteralPath (Join-Path $owner 'shared.txt')
 'untracked owner work' | Set-Content -LiteralPath (Join-Path $owner 'personal.txt')
 $statusBefore = @(G $owner @('status', '--porcelain=v1')) -join "`n"
 $script = Join-Path $PSScriptRoot 'btr_sync_upstream.ps1'
@@ -62,6 +63,19 @@ try { & $script -RepositoryRoot $owner -SourceRef 'codex/conflicting-btr' -RunId
 $cr = Get-Content -LiteralPath (Join-Path $owner 'evidence/upstream-sync/conflict/sync.json') -Raw | ConvertFrom-Json
 Assert ($conflict -and $cr.state -eq 'CONFLICTS' -and 'shared.txt' -in $cr.conflicts) 'conflict is retained and reported for Codex'
 Assert (@(G $cr.worktree @('diff','--name-only','--diff-filter=U')).Count -eq 1) 'unmerged index remains available'
+$acceptanceMissing = $false
+try { & $script -RepositoryRoot $r.worktree -AcceptCandidate HEAD -RunId 'missing-note' } catch { $acceptanceMissing=$true }
+Assert $acceptanceMissing 'acceptance requires explicit decision note'
+& $script -RepositoryRoot $r.worktree -AcceptCandidate HEAD -AcceptanceNote 'Fixture user accepted candidate as maintenance source only' -RunId 'accept'
+Assert (@(G $owner @('rev-parse','codex/btr-accepted'))[0] -eq $r.candidateCommit) 'accepted maintenance source advances separately'
+& $script -RepositoryRoot $r.worktree -RunId 'accepted-next'
+$next = Get-Content -LiteralPath (Join-Path $r.worktree 'evidence/upstream-sync/accepted-next/sync.json') -Raw | ConvertFrom-Json
+Assert ($next.sourceCommit -eq $r.candidateCommit) 'next default sync inherits accepted candidate'
+Assert ($next.worktree -eq (Join-Path $owner '.btr-wt/accepted-next')) 'candidate invocation creates sibling worktree'
+$oldSource = $false
+try { & $script -RepositoryRoot $r.worktree -SourceRef trial -RunId 'old-source' } catch { $oldSource=$true }
+Assert $oldSource 'explicit older source cannot drop accepted fixes'
+Assert (@(G $owner @('rev-parse','codex/btr-stable'))[0] -eq $source) 'source acceptance does not promote stable'
 $beforeRemote = @(G $owner @('rev-parse','refs/remotes/upstream/main'))[0]
 # Simulate a server-side rewrite via CAS on the disposable bare fixture only.
 G $remote @('update-ref','refs/heads/main',$base,$beforeRemote) | Out-Null

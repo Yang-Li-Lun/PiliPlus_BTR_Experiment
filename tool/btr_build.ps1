@@ -23,8 +23,7 @@ if ($ShortIpcPath) {
 }
 $key = Join-Path $repo '.toolchain/btr-debug.keystore'
 if (!(Test-Path -LiteralPath $key)) {
-    & "$JavaHome/bin/keytool.exe" -genkeypair -keystore $key -storepass android -keypass android -alias androiddebugkey -dname 'CN=BTR Experiment Dev,O=Local Experiment,C=TW' -keyalg RSA -keysize 2048 -validity 10000
-    if ($LASTEXITCODE) { throw 'Local development key generation failed' }
+    throw 'Existing DEV signing key required; prepare candidate toolchain without replacing signing identity'
 }
 Push-Location $repo
 try {
