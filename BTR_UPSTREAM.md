@@ -60,7 +60,7 @@ $env:PUB_CACHE = Join-Path (Get-Location) '.toolchain/pub-cache'
 $env:CI = 'true'
 & .\.toolchain\flutter\bin\flutter.bat pub get --enforce-lockfile
 pwsh -NoProfile -File .\tool\btr_test.ps1
-& .\.toolchain\flutter\bin\flutter.bat analyze --no-pub --no-fatal-infos
+& .\.toolchain\flutter\bin\flutter.bat analyze --no-pub --no-fatal-infos lib test
 & .\.toolchain\flutter\bin\flutter.bat test --no-pub test/btr/audio_task_removed_flutter.dart
 pwsh -NoProfile -File .\tool\btr_diagnostics_flutter_test.ps1
 pwsh -NoProfile -File .\tool\btr_verified_write_test.ps1 -JavaHome <JDK>
@@ -87,4 +87,3 @@ ref 已 checkout、歷史缺前一接受來源、未提交、或 SHA 不等於 H
 本機安全回歸：pwsh -NoProfile -File .\tool\btr_sync_tests.ps1（只用 disposable Git fixtures）。
 保留原始 evidence、候選、分支與 APK；不 push、不建 PR、不發布、不自動裝機。
 歷史同步報告為 BTR_UPSTREAM_RESULT_20261016.md；驗收缺口見 BTR_DEVELOPMENT_INDEX.md。
-

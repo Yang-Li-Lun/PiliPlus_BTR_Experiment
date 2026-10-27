@@ -26,7 +26,8 @@ $remote = Join-Path $scratch 'upstream.git'
 if ($LASTEXITCODE) { throw 'Cannot create local bare fixture' }
 & git clone $remote $owner
 if ($LASTEXITCODE) { throw 'Cannot create owner fixture' }
-G $owner @('switch', '-c', 'codex/btr-maintenance') | Out-Null
+G $owner @('switch', '-c', 'codex/fixture-tools') | Out-Null
+G $owner @('branch', 'codex/btr-maintenance', $base) | Out-Null
 $config = @{schemaVersion=2;upstreamUrl=$remote;upstreamRemote='upstream';upstreamBranch='main';upstreamMirror='codex/upstream-piliplus';bootstrapSource='refs/tags/trial';acceptedSource='refs/heads/codex/btr-accepted';stableBranch='codex/btr-stable';requiredFeatures=$base}
 $config | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $owner 'tool/btr_upstream.json')
 Commit $owner 'BTR tooling'
@@ -46,7 +47,11 @@ $r = Get-Content -LiteralPath (Join-Path $owner 'evidence/upstream-sync/clean/sy
 Assert ($r.state -eq 'MERGED') 'automatic non-conflicting merge'
 Assert ((@(G $owner @('status', '--porcelain=v1')) -join "`n") -ceq $statusBefore) 'dirty tracked and untracked owner files unchanged'
 Assert (@(G $owner @('rev-parse', 'codex/btr-stable'))[0] -eq $source) 'stable ref unchanged'
-Assert (@(G $owner @('rev-parse', 'codex/btr-maintenance'))[0] -eq $source) 'source ref unchanged'
+Assert ($r.sourceCommit -eq $source) 'default uses accepted trial rather than older maintenance branch'
+Assert (@(G $owner @('rev-parse', 'codex/btr-maintenance'))[0] -eq $base) 'older maintenance ref unchanged'
+& $script -RepositoryRoot $owner -RunId 'unaccepted-default'
+$unaccepted = Get-Content -LiteralPath (Join-Path $owner 'evidence/upstream-sync/unaccepted-default/sync.json') -Raw | ConvertFrom-Json
+Assert ($unaccepted.sourceCommit -eq $source) 'an unaccepted candidate never becomes the default source'
 & $script -RepositoryRoot $owner -SourceRef $r.candidateBranch -RunId 'repeat'
 $repeat = Get-Content -LiteralPath (Join-Path $owner 'evidence/upstream-sync/repeat/sync.json') -Raw | ConvertFrom-Json
 Assert ($repeat.state -eq 'ALREADY_INTEGRATED') 'repeated sync from candidate does not replay BTR changes'

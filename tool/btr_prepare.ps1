@@ -2,7 +2,15 @@ $ErrorActionPreference = 'Stop'
 $repo = Split-Path -Parent $PSScriptRoot
 $sdk = Join-Path $repo '.toolchain/flutter'
 $cache = Join-Path $repo '.toolchain/pub-cache'
-if (!(Test-Path -LiteralPath "$sdk/bin/flutter.bat")) { throw 'Clone Flutter tag 3.47.7 into .toolchain/flutter first.' }
+$required = (Get-Content -Raw -LiteralPath (Join-Path $repo '.fvmrc') | ConvertFrom-Json).flutter
+if (!(Test-Path -LiteralPath "$sdk/bin/flutter.bat")) { throw "Prepare private Flutter $required in .toolchain/flutter first." }
+foreach ($directory in @((Join-Path $repo '.toolchain'), $sdk, $cache)) {
+  if ((Get-Item -LiteralPath $directory).Attributes -band [IO.FileAttributes]::ReparsePoint) {
+    throw 'Patch preparation requires independent candidate SDK/cache, not a shared junction'
+  }
+}
+$version = Get-Content -Raw -LiteralPath "$sdk/bin/cache/flutter.version.json" | ConvertFrom-Json
+if ($version.frameworkVersion -ne $required) { throw 'Flutter version does not match .fvmrc' }
 $env:PUB_CACHE = $cache
 $env:CI = 'true'
 $env:GRADLE_USER_HOME = Join-Path $repo '.toolchain/gradle-home'
@@ -28,9 +36,13 @@ foreach ($name in $flutterPatches) {
   if ($LASTEXITCODE -ne 0) { throw "Patch failed: $name" }
   Write-Output "Applied Flutter: $name"
 }
-$material = Get-ChildItem -LiteralPath "$cache/hosted/pub.dev" -Directory |
-  Where-Object Name -eq 'material_ui-1.6.0' | Select-Object -First 1
-if (!$material) { throw 'Run flutter pub get --enforce-lockfile with local PUB_CACHE first.' }
+$configFile = Join-Path $repo '.dart_tool/package_config.json'
+$config = Get-Content -Raw -LiteralPath $configFile | ConvertFrom-Json
+$package = $config.packages | Where-Object name -eq 'material_ui'
+if (!$package) { throw 'Run flutter pub get --enforce-lockfile with local PUB_CACHE first.' }
+$material = Get-Item -LiteralPath ([Uri]::new([Uri]::new($configFile), $package.rootUri).LocalPath)
+if (!$material.FullName.StartsWith($cache + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase) -or
+    ($material.Attributes -band [IO.FileAttributes]::ReparsePoint)) { throw 'material_ui must be in independent candidate cache' }
 $relative = [IO.Path]::GetRelativePath($repo, $material.FullName).Replace('\','/')
 foreach ($name in @('modal_barrier_material','navigation_drawer','popup_menu','fab',
  'text_field','scaffold','refresh_indicator','tabs','bottom_sheet_android')) {
