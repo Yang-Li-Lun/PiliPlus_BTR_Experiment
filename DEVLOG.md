@@ -28,3 +28,12 @@
 - 沿用既有離線測試／建置紀錄，未重跑或重建；長時間播放、完整效能、原生／GPU 資源驗收仍未完成，Flutter/native 的 MSVC 阻擋維持原狀。
 - 保留舊版 55fd、歷史穩定版、分支、標籤、APK、工作樹與證據。根工作樹既有未提交／未追蹤檔案保持原樣；此日誌在已接受候選中延續既有日誌內容。
 - 完整定位與證據界線見 `BTR_STABLE_ACCEPTANCE_20261106.md`；沒有推送、PR、正式發布或核心程式修改。
+
+## 2026-11-06｜BTR 模組化與專屬設定候選
+
+- 從已接受維護來源 `184c1fe8ea5649593d0dcedda1b420e101bcc2b4` 建立 `codex/btr-modular-20261106-01`／`.btr-wt/mod-1106-01`。應用程式碼 Commit 為 `d30b2e0d3e6694fe13fece12f30034a257454848`；未同步上游、未接受候選或提升穩定版。
+- 將 BTR 播放器適配集中至既有私有 part/extension，保留共用狀態所有權及原操作順序；抽出 DASH 候選擷取、獨立設定儲存／通知與專屬設定 panel。傳輸核心、安全上限、Android 平臺碼及應用依賴未變。模組與同步審查邊界見 `BTR_MODULES.md`。
+- Dart 169 項均取得通過結果（168 項完整執行通過，加 1 項擷取位置修正後針對性通過）；設定頁／診斷通道 13/13、同步安全 19 assertions 通過。完整及最終修改範圍靜態分析均無 error／warning；Flutter/native 仍因缺 MSVC 在案例前阻擋。
+- 建置 `modular-20261106-01` ARM64 DEV APK，套件及既有簽章一致。SHA-256 `ad50e0e6c20c6c29479f49bb737719fdc90ba4fe1ae12e3176d64d364362715d`，24,796,590 bytes。初次 Gradle loopback 錯誤後依規則以候選短 IPC 路徑建置成功。
+- 完整交付、失敗／阻擋及證據界線見 `BTR_MODULAR_RESULT_20261106.md`；APK 位於候選 `build/btr-candidates/modular-20261106-01/`，原始日誌位於候選 `evidence/modular-20261106-01/`。
+- 未安裝或操作裝置；原 stable／accepted refs、版本清單、歷史 APK／evidence／工作樹保留。原生資源、長時播放、完整效能及實機 UI／SAF 驗收仍未完成。

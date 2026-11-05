@@ -2,6 +2,14 @@
 param([switch]$IncludeSettings)
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path $PSScriptRoot -Parent
+if ($IncludeSettings -and !(Test-Path -LiteralPath (Join-Path $repo 'lib/services/btr/settings_service.dart'))) {
+    # The sync workflow can carry newer tools onto the accepted legacy app.
+    Write-Output 'Settings panel tests not applicable to this legacy source; diagnostics tests still run.'
+    $IncludeSettings = $false
+}
+if ($IncludeSettings -and !(Test-Path -LiteralPath (Join-Path $repo 'test/btr/settings_page_flutter.dart'))) {
+    throw 'Modular settings source is missing its UI tests'
+}
 $env:PUB_CACHE = Join-Path $repo '.toolchain/pub-cache'
 $env:CI = 'true'
 $flutter = Join-Path $repo '.toolchain/flutter/bin/flutter.bat'
