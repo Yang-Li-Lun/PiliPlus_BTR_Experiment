@@ -2,6 +2,8 @@
 
 本專案是獨立的 Android DEV 工程。目前最新穩定使用版為 **PiliPlus-BTR-Upstream-20261027-01**（Build ID `upstream-20261027-01`），使用者於 2026-11-06 明確接受；APK 建置來源固定為 `790e357f661b935b5eb064d9affa54279b0c51a9`。`codex/btr-stable` 對應該建置來源，`codex/btr-accepted` 為後續上游同步的有效維護來源。完整穩定性、長時間播放、完整效能及原生資源驗收仍未完成。APK、來源及未解問題統一見 [開發資料索引](BTR_DEVELOPMENT_INDEX.md)、[版本清單](tool/btr_current_recommendation.json)與[接受紀錄](BTR_STABLE_ACCEPTANCE_20261106.md)。維護提交包含後續文件，不能當成原 APK 的建置 Commit。
 
+目前模組化候選的程式邊界與專屬設定介面見 [BTR_MODULES.md](BTR_MODULES.md)。候選不改變已接受維護來源或上述穩定使用版。
+
 下列各日期段落保留當時階段的設定與驗證紀錄；其中「未驗證」等結論只適用於該日期及該版本。現行版本與驗收範圍以上述索引為準；舊暫用版 `55fd75e41` 及歷史穩定基準 `788faa8abee2ff325205d89a9fa24869821685e3` 的固定標籤、APK 與證據繼續保留。
 
 ## 設定與監控整合（2026-10-16）

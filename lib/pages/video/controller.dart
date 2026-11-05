@@ -3,6 +3,7 @@ import 'dart:io' show Platform;
 import 'dart:math' show min;
 import 'dart:ui';
 
+import 'package:PiliPlus/services/btr/dash_sources.dart';
 import 'package:PiliPlus/common/style.dart';
 import 'package:PiliPlus/common/widgets/pair.dart';
 import 'package:PiliPlus/common/widgets/progress_bar/segment_progress_bar.dart';
@@ -135,17 +136,10 @@ class VideoDetailController extends GetxController
   late VideoItem firstVideo;
   String? videoUrl;
   String? audioUrl;
-  List<String> _btrVideoUrls = const [];
-  List<String> _btrAudioUrls = const [];
+  final _btrSources = BtrDashSources();
 
-  String _dashUrl(Iterable<String> urls, {bool isAudio = false}) {
-    if (isAudio) {
-      _btrAudioUrls = urls.toList(growable: false);
-    } else {
-      _btrVideoUrls = urls.toList(growable: false);
-    }
-    return VideoUtils.getCdnUrl(urls, isAudio: isAudio);
-  }
+  String _dashUrl(Iterable<String> urls, {bool isAudio = false}) =>
+      _btrSources.select(urls, isAudio: isAudio, nativeSelect: VideoUtils.getCdnUrl);
 
   Duration? defaultST;
   Duration? playedTime;
@@ -766,10 +760,10 @@ class VideoDetailController extends GetxController
           : NetworkSource(
               videoSource: videoUrl!,
               audioSource: audioUrl,
-              videoCandidates: data.dash == null ? const [] : _btrVideoUrls,
+              videoCandidates: data.dash == null ? const [] : _btrSources.video,
               audioCandidates: data.dash == null || (audioUrl?.isEmpty ?? true)
                   ? const []
-                  : _btrAudioUrls,
+                  : _btrSources.audio,
             ),
       seekTo: seek,
       duration: data.timeLength == null
@@ -1573,8 +1567,7 @@ class VideoDetailController extends GetxController
               Get.back();
               this.videoUrl = videoUrl;
               this.audioUrl = audioUrl;
-              _btrVideoUrls = const [];
-              _btrAudioUrls = const [];
+              _btrSources.clear();
               playerInit();
             },
             child: const Text('确定'),

@@ -14,22 +14,10 @@ import 'package:PiliPlus/services/btr/read_recovery.dart';
 import 'package:PiliPlus/services/btr/settings.dart';
 import 'package:PiliPlus/services/btr/transport.dart';
 import 'package:PiliPlus/services/playback_task_scope.dart';
-import 'package:PiliPlus/utils/storage.dart';
-import 'package:flutter/foundation.dart';
+import 'package:PiliPlus/services/btr/settings_service.dart';
 import 'package:media_kit/media_kit.dart';
 
 class BtrPlayback {
-  static final settingsStore = BtrSettingsStore(
-    (key) => GStorage.setting.get(key),
-    (values) => GStorage.setting.putAll(values),
-  );
-  static BtrSettings get selectedSettings => settingsStore.current;
-  static final settingsRevision = ValueNotifier<int>(0);
-  static Future<void> saveSettings(BtrSettings settings) async {
-    await settingsStore.save(settings);
-    settingsRevision.value++;
-  }
-
   static BtrPlayback? current;
   static final recent = <Map<String, Object?>>[];
 
@@ -55,11 +43,11 @@ class BtrPlayback {
     if (!Platform.isAndroid || live || source is! NetworkSource) {
       return (null, source);
     }
-    final playback = BtrPlayback(selectedSettings);
+    final playback = BtrPlayback(BtrPreferences.current);
     playback.metrics.separateAudioExpected =
         source.audioSource?.isNotEmpty == true;
     try {
-      await settingsStore.load();
+      await BtrPreferences.controller.load();
     } catch (_) {
       playback.metrics.event('settings-migration-failed');
     }
@@ -250,8 +238,8 @@ class BtrPlayback {
 
   static Map<String, Object?> diagnosticSnapshot() => BtrDiagnostics.report(
     selectedSettings: {
-      'mode': selectedSettings.mode.name,
-      ...selectedSettings.options,
+      'mode': BtrPreferences.current.mode.name,
+      ...BtrPreferences.current.options,
     },
     current: current?.snapshot(),
     recent: recent,

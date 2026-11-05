@@ -1,4 +1,5 @@
 #Requires -Version 7.0
+param([switch]$IncludeSettings)
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path $PSScriptRoot -Parent
 $env:PUB_CACHE = Join-Path $repo '.toolchain/pub-cache'
@@ -16,6 +17,16 @@ function LockedVersion([string]$Name) {
 }
 $filePicker = LockedVersion 'file_picker'
 $pathProvider = LockedVersion 'path_provider'
+$settingsDependency = ''
+if ($IncludeSettings) {
+    # Reuse the already patched, locked Material UI package from this checkout.
+    $appConfigPath = Join-Path $repo '.dart_tool/package_config.json'
+    $appConfig = Get-Content -Raw -LiteralPath $appConfigPath | ConvertFrom-Json
+    $material = $appConfig.packages | Where-Object name -eq 'material_ui'
+    if (!$material) { throw 'Resolve the locked app packages before settings UI tests' }
+    $materialPath = [Uri]::new([Uri]::new($appConfigPath), $material.rootUri).LocalPath.Replace('\','/')
+    $settingsDependency = "  material_ui:`n    path: '$materialPath'"
+}
 @"
 name: btr_diagnostic_channel_tests
 publish_to: none
@@ -26,6 +37,7 @@ dependencies:
     sdk: flutter
   file_picker: $filePicker
   path_provider: $pathProvider
+$settingsDependency
 dev_dependencies:
   flutter_test:
     sdk: flutter
@@ -43,6 +55,8 @@ try {
         languageVersion = '3.13'
     }
     $config | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $path -Encoding utf8
-    & $flutter test --no-pub (Join-Path $repo 'test/btr/diagnostics_export_flutter.dart')
+    $cases = @((Join-Path $repo 'test/btr/diagnostics_export_flutter.dart'))
+    if ($IncludeSettings) { $cases += Join-Path $repo 'test/btr/settings_page_flutter.dart' }
+    & $flutter test --no-pub @cases
     exit $LASTEXITCODE
 } finally { Pop-Location }

@@ -19,9 +19,10 @@ codex/btr-maintenance 為保留的舊維護線，不是建議 APK 來源；main 
 ## 程式碼邊界
 
 政策、CDN 身分驗證、排程、Range/ETag、取消、容量、監控及設定集中在 lib/services/btr/。
-player_integration.dart 是 PlPlayerController library 的私有 part/extension，集中 terminal、read-stall、native error、EOF 校正與 seek resume。
+player_integration.dart 是 PlPlayerController library 的私有 part/extension，集中來源開啟、原生 EDL、Seek／refresh、terminal、read-stall、native error、EOF 校正與 seek resume。
 它仍共享 controller 的來源序號、Seek 意圖及生命週期，不是獨立播放器或另一套狀態機。
-共用 open/refresh/seek/play/dispose 留在 controller，保持 native stop → retire GET → reopen、最新 Seek 意圖及原始模式契約。
+controller 持有共用欄位、來源佇列與生命週期；公開 seek/refresh 直接轉接私有適配方法，play/dispose 及一般播放器功能留在 controller，保持 native stop → retire GET → reopen、最新 Seek 意圖及原始模式契約。
+設定模型、儲存通知與 UI 已獨立於播放 Session；完整模組、設定語意及上游適配清單見 [BTR_MODULES.md](BTR_MODULES.md)。本架構候選未自動更新已接受來源。
 播放與事件 hook、影音候選擷取、設定入口、overlay、AudioService task removal 仍須三方審查。
 不建立新 repository/package，不放寬 8 個 HTTP 回應、4 個執行槽、16 個上游連線及清理保護。
 
@@ -66,7 +67,7 @@ $env:CI = 'true'
 pwsh -NoProfile -File .\tool\btr_test.ps1
 & .\.toolchain\flutter\bin\flutter.bat analyze --no-pub --no-fatal-infos lib test
 & .\.toolchain\flutter\bin\flutter.bat test --no-pub test/btr/audio_task_removed_flutter.dart
-pwsh -NoProfile -File .\tool\btr_diagnostics_flutter_test.ps1
+pwsh -NoProfile -File .\tool\btr_diagnostics_flutter_test.ps1 -IncludeSettings
 pwsh -NoProfile -File .\tool\btr_verified_write_test.ps1 -JavaHome <JDK>
 pwsh -NoProfile -File .\tool\btr_build.ps1 -AndroidSdk <SDK> -JavaHome <JDK> -DeviceTest -BuildId <RunId>
 ~~~

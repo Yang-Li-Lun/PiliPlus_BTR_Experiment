@@ -8,10 +8,14 @@ void main() {
     final root = Directory.current.path.endsWith('btr_tests')
         ? Directory.current.parent.parent
         : Directory.current;
-    final source = File(
+    final controller = File(
       Platform.environment['BTR_CONTROLLER_SOURCE'] ??
           '${root.path}/lib/plugin/pl_player/controller.dart',
     ).readAsStringSync();
+    final integration = File(
+      '${root.path}/lib/services/btr/player_integration.dart',
+    ).readAsStringSync();
+    final source = '$controller\n$integration';
     final start = source.indexOf('Future<bool> _createVideoController(');
     final end = source.indexOf('final (session, preparedSource)', start);
     expect(start >= 0 && end > start, isTrue);

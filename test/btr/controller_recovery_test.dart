@@ -78,6 +78,8 @@ void main() {
       'Future<void> _recoverBtrSeekEof(',
       'void _checkBtrReadStall(',
       'Future<void> _stopTerminalBtr(',
+      'Future<void> _seekBtrPlayer(',
+      'Future<void>? _refreshBtrPlayer(',
     ].where(source.contains).map((marker) => method(source, marker)).join('\n');
     final native = File(
       '${root.path}/.toolchain/pub-cache/git/media-kit-73771ec38176be2d984a3049c28177bce23b54a0/media_kit/lib/src/player/native/player/real.dart',

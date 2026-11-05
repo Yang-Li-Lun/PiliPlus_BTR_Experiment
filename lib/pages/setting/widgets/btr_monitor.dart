@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:PiliPlus/services/btr/monitor_data.dart';
 import 'package:PiliPlus/services/btr/playback.dart';
+import 'package:PiliPlus/services/btr/settings_service.dart';
 import 'package:material_ui/material_ui.dart';
 
 /// Refresh only this small subtree, only while it is mounted and enabled.
@@ -12,10 +13,10 @@ class BtrMonitor extends StatelessWidget {
   final bool compact;
 
   @override
-  Widget build(BuildContext context) => ValueListenableBuilder<int>(
-    valueListenable: BtrPlayback.settingsRevision,
-    builder: (context, revision, child) {
-      if (!BtrPlayback.selectedSettings.monitorEnabled) {
+  Widget build(BuildContext context) => ListenableBuilder(
+    listenable: BtrPreferences.controller,
+    builder: (context, child) {
+      if (!BtrPreferences.current.monitorEnabled) {
         return compact
             ? const SizedBox.shrink()
             : const Text('即時監控已關閉；仍可複製有界診斷紀錄。');
@@ -59,7 +60,7 @@ class _ReadoutState extends State<_Readout> {
     }
     final data = session.snapshot();
     final m = BtrMonitorData(data);
-    final prefs = BtrPlayback.selectedSettings;
+    final prefs = BtrPreferences.current;
     final threads =
         '${BtrMonitorData.count(data['activeConnections'])} / ${BtrMonitorData.count(data['concurrencyLimit'])}';
     final network = BtrMonitorData.bytes(data['networkBps5s'], rate: true);
@@ -103,6 +104,13 @@ class _ReadoutState extends State<_Readout> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         line('本次播放', '${session.mode.label} · ${m.state}'),
+        line(
+          '本次線程設定',
+          session.settings.autoConcurrency
+              ? '自動 8→12→16'
+              : '手動 ${session.settings.manualThreads}',
+        ),
+        line('本次 CDN 偏好', session.settings.preferredCdn ?? '自動優選'),
         line('上游並行請求／目前上限', threads),
         line(
           '設定上限／資源上限',
