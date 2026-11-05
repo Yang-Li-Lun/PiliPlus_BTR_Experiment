@@ -1,6 +1,8 @@
 # BTR 上游同步
 
-目前維護架構與首次更新候選見 [2026-10-27 交付紀錄](BTR_MAINTENANCE_RESULT_20261027.md)；暫用版本仍依既有版本清單。
+目前最新穩定使用版為 **PiliPlus-BTR-Upstream-20261027-01**，已於 2026-11-06 依使用者明確決定接受。APK 建置來源為 `790e357f661b935b5eb064d9affa54279b0c51a9`；`codex/btr-stable` 指向該建置來源，`codex/btr-accepted` 指向含接受文件的維護來源。完整定位見 [接受紀錄](BTR_STABLE_ACCEPTANCE_20261106.md)及[版本清單](tool/btr_current_recommendation.json)。
+
+目前有效工具工作樹為 repository 根目錄下 `.btr-wt/up-1027-01`；後續同步在此使用新版工具。2026-10-27 [交付紀錄](BTR_MAINTENANCE_RESULT_20261027.md)及 artifact.json 的未接受狀態是當時紀錄，現行狀態以上述接受紀錄為準。
 
 唯一持續同步的上游是 PiliPlus 官方 main：https://github.com/bggRGjQaUbCoE/PiliPlus.git。
 Android BTR 為本專案自行維護，不追蹤或自動移植 Bilibili-thread-ripper 更新；原 MIT notices 保留。
@@ -8,10 +10,10 @@ Android BTR 為本專案自行維護，不追蹤或自動移植 Bilibili-thread-
 ## 維護來源
 
 tool/btr_upstream.json 的 requiredFeatures 固定完整功能基準 55fd75e41ae518c0330a11ea646ddf8b8b2bcae2。
-沒有已接受維護來源時使用 bootstrapSource：btr-user-trial-20261027-55fd75e41。
-使用者明確接受候選後，acceptedSource（codex/btr-accepted）才可前進。後續來源必須包含它及 requiredFeatures。
+acceptedSource（codex/btr-accepted）已建立；後續同步預設從該 ref 建立候選，必須包含它及 requiredFeatures。bootstrapSource：btr-user-trial-20261027-55fd75e41 僅供尚未建立接受來源的初始化，不是目前預設版本。
+接受來源固定標籤為 btr-maintenance-accepted-20261106-up-1027-01；審查前候選 HEAD c687c98aa290cafc8a36751b00fb7d18a10eb0b0 另由 btr-accepted-candidate-20261106-up-1027-01 保留。
 codex/btr-maintenance 為保留的舊維護線，不是建議 APK 來源；main 也包含 BTR，不是純上游。
-同步與接受維護來源都不提升 codex/btr-stable、不變更 tool/btr_current_recommendation.json。
+同步工具與 AcceptCandidate 本身不提升 codex/btr-stable、不變更 tool/btr_current_recommendation.json；本次穩定分支與版本清單提升依使用者另外明確指定穩定使用版的授權完成。
 未接受候選只能在明確指定 SourceRef 時接續。測試與建置通過不是 Android 驗收或使用者接受。
 
 ## 程式碼邊界

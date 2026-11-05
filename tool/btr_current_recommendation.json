@@ -1,52 +1,148 @@
 {
-  "schema": 1,
-  "updatedDate": "2026-10-27",
+  "schema": 2,
+  "updatedDate": "2026-11-06",
   "timezone": "Asia/Taipei",
-  "status": "provisional-user-trial",
-  "userDecision": "此版本可先使用",
+  "status": "USER_ACCEPTED_CURRENT_STABLE",
+  "version": "PiliPlus-BTR-Upstream-20261027-01",
+  "userDecision": "使用者確認可以使用，並明確指定為目前最新穩定使用版",
   "overallAcceptance": "NOT_ACHIEVED",
   "formalRelease": false,
-  "sourceCommit": "55fd75e41ae518c0330a11ea646ddf8b8b2bcae2",
-  "sourceTag": "btr-user-trial-20261027-55fd75e41",
-  "stableBaselineCommit": "788faa8abee2ff325205d89a9fa24869821685e3",
-  "buildId": "http-stop-diag-20261027-01",
+  "sourceCommit": "790e357f661b935b5eb064d9affa54279b0c51a9",
+  "sourceTag": "btr-stable-upstream-20261027-01",
+  "stableBranch": "codex/btr-stable",
+  "stableBaselineCommit": "790e357f661b935b5eb064d9affa54279b0c51a9",
+  "historicalStableBaselineCommit": "788faa8abee2ff325205d89a9fa24869821685e3",
+  "candidateBranch": "codex/btr-update-up-1027-01",
+  "reviewedCandidateCommit": "c687c98aa290cafc8a36751b00fb7d18a10eb0b0",
+  "reviewedCandidateTag": "btr-accepted-candidate-20261106-up-1027-01",
+  "acceptedMaintenanceRef": "refs/heads/codex/btr-accepted",
+  "acceptedMaintenanceTag": "btr-maintenance-accepted-20261106-up-1027-01",
+  "maintenanceSourceScope": "Reviewed candidate plus acceptance documentation and metadata only; resolve the accepted ref/tag for the full maintenance commit.",
+  "upstreamCommit": "d680e3f95cf777ff20492dd2a23c89264481dca0",
+  "buildId": "upstream-20261027-01",
   "packageId": "com.example.piliplus.btr.experiment.dev",
   "abi": "arm64-v8a",
   "apk": {
-    "path": ".btr-wt/sp-1026-01/build/btr-candidates/http-stop-diag-20261027-01/PiliPlus-BTR-HttpStopDiag-20261027-01-dev-arm64-v8a.apk",
-    "bytes": 24539943,
-    "sha256": "7045264a52354ef213332d495a81b84003466c40aedb4817ea48b10a691579cf",
+    "path": ".btr-wt/up-1027-01/build/btr-candidates/upstream-20261027-01/PiliPlus-BTR-Upstream-20261027-01-dev-arm64-v8a.apk",
+    "bytes": 24799322,
+    "sha256": "4b70a98ea4dd6ab8a4cc17b3586cec855796029188fb9b64bf6f554811b05a5d",
     "signerCertificateSha256": "fc32b2cbc48673d7f110c98acfcf360bb9a0d5bc166ecfeeeb2bd33935c22264"
   },
   "pathsAreRelativeTo": "repository-root",
   "dataRetention": "APK, evidence and worktree paths are local and ignored by Git; preserve them separately from Git commits.",
   "index": "BTR_DEVELOPMENT_INDEX.md",
-  "humanValidation": {
-    "deviceModel": "POCO M2012K11AG",
-    "video": "BV1kUpsedE4R",
-    "quality": "4K HEVC",
-    "speed": "1.0X",
-    "rounds": [
-      {"name": "rapid-observed", "seekIntervalsMs": [897, 978], "lastSeekTimelineMs": 1876, "proxyCapacityRejections": 0, "playerErrors": 0, "extraBufferingEvents": 0, "humanAvRecoveryConfirmed": true},
-      {"name": "rapid-denser", "seekIntervalsMs": [559, 583], "lastSeekTimelineMs": 2203, "proxyCapacityRejections": 0, "playerErrors": 0, "extraBufferingEvents": 0, "humanAvRecoveryConfirmed": true}
-    ],
-    "scope": "Two bounded short runs; timeline metric is not exact first-frame or audible-start latency.",
-    "report": ".btr-wt/sp-1026-01/BTR_RAPID_SEEK_HUMAN_CONFIRM_20261027.md",
-    "evidence": "evidence/rapid-seek-human-confirm-20261027-01",
-    "evidenceManifest": "evidence/rapid-seek-human-confirm-20261027-01/manifest.sha256.json"
+  "acceptanceReport": ".btr-wt/up-1027-01/BTR_STABLE_ACCEPTANCE_20261106.md",
+  "userConfirmation": {
+    "recordedDate": "2026-11-06",
+    "device": "POCO F8 Ultra",
+    "installation": "Successful, reported by user",
+    "installedApkSha256": "4b70a98ea4dd6ab8a4cc17b3586cec855796029188fb9b64bf6f554811b05a5d",
+    "hashMatch": "Confirmed by user; not independently rechecked on device in this task",
+    "usable": true,
+    "currentStableDesignation": true,
+    "scope": "User acceptance for current daily use; not a complete performance, long-playback or native-resource acceptance."
+  },
+  "objectiveValidation": {
+    "localApkHash": "Recomputed 2026-11-06; matches expected SHA-256 and 24799322 bytes",
+    "ancestry": "APK build contains upstream and required 55fd history; reviewed candidate contains APK build",
+    "applicationCode": "No application-code changes between APK build and reviewed candidate or acceptance documentation",
+    "priorReport": ".btr-wt/up-1027-01/BTR_MAINTENANCE_RESULT_20261027.md",
+    "priorOfflineDart": "168/168 PASS; historical result, not rerun",
+    "priorSyncSafety": "19 assertions PASS; historical result, not rerun",
+    "priorFlutterNative": "BLOCKED before cases: cnativeapi requires unavailable Windows MSVC",
+    "deviceOperationsThisTask": "NOT RUN"
   },
   "unresolved": [
     "Native ffmpeg and ImageReader interruption causes and producer identity",
     "Native and GPU resource ownership and bounds under repeated seeks",
     "No general speed advantage over original mode established",
-    "Long-duration playback not tested or accepted"
+    "Long-duration playback not tested or accepted",
+    "Complete performance acceptance not performed",
+    "AudioService Flutter/native and upstream test/utils remain BLOCKED by missing Windows MSVC"
   ],
   "acceptanceGapReport": ".btr-wt/ip-1027-01/BTR_ACCEPTANCE_GAPS_20261027.md",
+  "historicalRecommendations": [
+    {
+      "status": "SUPERSEDED_CURRENT_RECOMMENDATION_PRESERVED",
+      "sourceCommit": "55fd75e41ae518c0330a11ea646ddf8b8b2bcae2",
+      "sourceTag": "btr-user-trial-20261027-55fd75e41",
+      "buildId": "http-stop-diag-20261027-01",
+      "apk": {
+        "path": ".btr-wt/sp-1026-01/build/btr-candidates/http-stop-diag-20261027-01/PiliPlus-BTR-HttpStopDiag-20261027-01-dev-arm64-v8a.apk",
+        "bytes": 24539943,
+        "sha256": "7045264a52354ef213332d495a81b84003466c40aedb4817ea48b10a691579cf",
+        "signerCertificateSha256": "fc32b2cbc48673d7f110c98acfcf360bb9a0d5bc166ecfeeeb2bd33935c22264"
+      },
+      "userDecision": "此版本可先使用",
+      "humanValidation": {
+        "deviceModel": "POCO M2012K11AG",
+        "video": "BV1kUpsedE4R",
+        "quality": "4K HEVC",
+        "speed": "1.0X",
+        "rounds": [
+          {
+            "name": "rapid-observed",
+            "seekIntervalsMs": [
+              897,
+              978
+            ],
+            "lastSeekTimelineMs": 1876,
+            "proxyCapacityRejections": 0,
+            "playerErrors": 0,
+            "extraBufferingEvents": 0,
+            "humanAvRecoveryConfirmed": true
+          },
+          {
+            "name": "rapid-denser",
+            "seekIntervalsMs": [
+              559,
+              583
+            ],
+            "lastSeekTimelineMs": 2203,
+            "proxyCapacityRejections": 0,
+            "playerErrors": 0,
+            "extraBufferingEvents": 0,
+            "humanAvRecoveryConfirmed": true
+          }
+        ],
+        "scope": "Two bounded short runs; timeline metric is not exact first-frame or audible-start latency.",
+        "report": ".btr-wt/sp-1026-01/BTR_RAPID_SEEK_HUMAN_CONFIRM_20261027.md",
+        "evidence": "evidence/rapid-seek-human-confirm-20261027-01",
+        "evidenceManifest": "evidence/rapid-seek-human-confirm-20261027-01/manifest.sha256.json"
+      },
+      "scope": "Historical 55fd results only; not evidence of device measurements on the current upstream APK."
+    }
+  ],
   "preservedCandidates": [
-    {"sourceCommit": "e674fff04a6be6ffe1a4a7aeeb97b9828e4db343", "status": "NOT_ADOPTED", "purpose": "bounded preview cache", "apkPath": ".btr-wt/sp-1026-01/build/btr-candidates/preview-cache-20261027-01/PiliPlus-BTR-PreviewCache-20261027-01-dev-arm64-v8a.apk"},
-    {"sourceCommit": "3e45cb1a0311084c7682c7b3579a51d1ec3beab2", "status": "NOT_ADOPTED", "purpose": "explicit image descriptor disposal", "apkPath": ".btr-wt/sp-1026-01/build/btr-candidates/preview-descriptor-20261027-01/PiliPlus-BTR-PreviewDescriptor-20261027-01-dev-arm64-v8a.apk"},
-    {"sourceCommit": "4d0812b1b3dc18dfd19783ecd7433117c2257b4d", "status": "OFFLINE_REJECTED_NO_APK", "purpose": "finite HTTP response window", "report": ".btr-wt/rw-1027-01/BTR_RESPONSE_WINDOW_OFFLINE_RESULT_20261027.md"},
-    {"sourceCommit": "b195327e45259d34978577c0a3c6102af2566a34", "status": "DIAGNOSTIC_ONLY", "purpose": "weak image handle ownership probe", "apkPath": ".btr-wt/ip-1027-01/build/btr-candidates/preview-owner-probe-20261027-01/PiliPlus-BTR-PreviewOwnerProbe-20261027-01-dev-arm64-v8a.apk"},
-    {"sourceCommit": "063da6010f89d7720e854cb1ff539567fe77f10c", "status": "CONTROL_NOT_FOR_USE", "purpose": "capacity retirement ablation", "apkPath": ".btr-wt/sp-1026-01/build/btr-candidates/capacity-ablation-20261027-01/PiliPlus-BTR-CONTROL-NOT-FOR-USE-CapacityAblation-20261027-01-dev-arm64-v8a.apk"}
+    {
+      "sourceCommit": "e674fff04a6be6ffe1a4a7aeeb97b9828e4db343",
+      "status": "NOT_ADOPTED",
+      "purpose": "bounded preview cache",
+      "apkPath": ".btr-wt/sp-1026-01/build/btr-candidates/preview-cache-20261027-01/PiliPlus-BTR-PreviewCache-20261027-01-dev-arm64-v8a.apk"
+    },
+    {
+      "sourceCommit": "3e45cb1a0311084c7682c7b3579a51d1ec3beab2",
+      "status": "NOT_ADOPTED",
+      "purpose": "explicit image descriptor disposal",
+      "apkPath": ".btr-wt/sp-1026-01/build/btr-candidates/preview-descriptor-20261027-01/PiliPlus-BTR-PreviewDescriptor-20261027-01-dev-arm64-v8a.apk"
+    },
+    {
+      "sourceCommit": "4d0812b1b3dc18dfd19783ecd7433117c2257b4d",
+      "status": "OFFLINE_REJECTED_NO_APK",
+      "purpose": "finite HTTP response window",
+      "report": ".btr-wt/rw-1027-01/BTR_RESPONSE_WINDOW_OFFLINE_RESULT_20261027.md"
+    },
+    {
+      "sourceCommit": "b195327e45259d34978577c0a3c6102af2566a34",
+      "status": "DIAGNOSTIC_ONLY",
+      "purpose": "weak image handle ownership probe",
+      "apkPath": ".btr-wt/ip-1027-01/build/btr-candidates/preview-owner-probe-20261027-01/PiliPlus-BTR-PreviewOwnerProbe-20261027-01-dev-arm64-v8a.apk"
+    },
+    {
+      "sourceCommit": "063da6010f89d7720e854cb1ff539567fe77f10c",
+      "status": "CONTROL_NOT_FOR_USE",
+      "purpose": "capacity retirement ablation",
+      "apkPath": ".btr-wt/sp-1026-01/build/btr-candidates/capacity-ablation-20261027-01/PiliPlus-BTR-CONTROL-NOT-FOR-USE-CapacityAblation-20261027-01-dev-arm64-v8a.apk"
+    }
   ]
 }

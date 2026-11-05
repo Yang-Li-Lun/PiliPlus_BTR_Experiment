@@ -7,10 +7,11 @@
   "stableBranch": "codex/btr-stable",
   "initialUpstream": "3d0aed958b3b7e59c39c121196f189f429719904",
   "initialFeatures": "f583de9e24871984470895bc71598773d28baab0",
-  "stableBaseline": "788faa8abee2ff325205d89a9fa24869821685e3",
-  "deviceAcceptance": "UNRESOLVED; preserve BTR_EXPERIMENT.md and historical evidence; Git/test/build success never promotes stable",
+  "stableBaseline": "790e357f661b935b5eb064d9affa54279b0c51a9",
+  "deviceAcceptance": "User accepted current stable use on 2026-11-06; installation and device APK hash match reported for POCO F8 Ultra. Long playback, full performance and native resources remain UNVERIFIED/UNRESOLVED; see BTR_STABLE_ACCEPTANCE_20261106.md.",
   "bootstrapSource": "refs/tags/btr-user-trial-20261027-55fd75e41",
   "acceptedSource": "refs/heads/codex/btr-accepted",
   "requiredFeatures": "55fd75e41ae518c0330a11ea646ddf8b8b2bcae2",
-  "btrMaintenance": "Local Android implementation; no Bilibili-thread-ripper upstream synchronization"
+  "btrMaintenance": "Local Android implementation; no Bilibili-thread-ripper upstream synchronization",
+  "historicalStableBaseline": "788faa8abee2ff325205d89a9fa24869821685e3"
 }
