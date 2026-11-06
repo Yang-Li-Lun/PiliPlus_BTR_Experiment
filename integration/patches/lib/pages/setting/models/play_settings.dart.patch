@@ -1,0 +1,28 @@
+diff --git a/lib/pages/setting/models/play_settings.dart b/lib/pages/setting/models/play_settings.dart
+index ae0d6cfb1ffaddd51f35c3dc3173f3185f394995..9f435814aa46d5953f32ff65f0a039e1d18dc5a5 100644
+--- a/lib/pages/setting/models/play_settings.dart
++++ b/lib/pages/setting/models/play_settings.dart
+@@ -7,6 +7,7 @@ import 'package:PiliPlus/models/common/super_chat_type.dart';
+ import 'package:PiliPlus/models/common/super_resolution_type.dart';
+ import 'package:PiliPlus/models/common/video/subtitle_pref_type.dart';
+ import 'package:PiliPlus/pages/setting/models/model.dart';
++import 'package:PiliPlus/pages/setting/pages/btr_experiment.dart';
+ import 'package:PiliPlus/pages/setting/pages/fullscreen_sc.dart';
+ import 'package:PiliPlus/pages/setting/widgets/select_dialog.dart';
+ import 'package:PiliPlus/pages/setting/widgets/slider_dialog.dart';
+@@ -29,6 +30,15 @@ import 'package:material_design_icons_flutter/material_design_icons_flutter.dart
+ import 'package:material_ui/material_ui.dart';
+ 
+ List<SettingsModel> get playSettings => [
++  if (Platform.isAndroid)
++    NormalModel(
++      title: 'BTR 功能設定',
++      subtitle: '整合加速、線程與 CDN 偏好、即時監控',
++      leading: const Icon(Icons.speed),
++      onTap: (context, setState) => Navigator.of(context).push(
++        MaterialPageRoute(builder: (_) => const BtrExperimentPage()),
++      ),
++    ),
+   NormalModel(
+     onTap: (context, setState) => Get.toNamed('/playSpeedSet'),
+     leading: const Icon(Icons.speed_outlined),

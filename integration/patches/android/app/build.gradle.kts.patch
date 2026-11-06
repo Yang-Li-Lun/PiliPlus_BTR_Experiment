@@ -1,0 +1,33 @@
+diff --git a/android/app/build.gradle.kts b/android/app/build.gradle.kts
+index e3f25c4e1d0a0e8fc78e511af511ccc1c5c91d88..dab2cbc0322d05ce47fb5f5da7ea643f77af19d7 100644
+--- a/android/app/build.gradle.kts
++++ b/android/app/build.gradle.kts
+@@ -28,7 +28,7 @@ android {
+     }
+ 
+     defaultConfig {
+-        applicationId = "com.example.piliplus"
++        applicationId = "com.example.piliplus.btr.experiment"
+         minSdk = flutter.minSdkVersion
+         targetSdk = 37
+         versionCode = flutter.versionCode
+@@ -37,6 +37,10 @@ android {
+ 
+     packagingOptions.jniLibs.useLegacyPackaging = true
+ 
++    signingConfigs.getByName("debug") {
++        storeFile = rootProject.file("../.toolchain/btr-debug.keystore")
++    }
++
+     val keyProperties = Properties().also {
+         val properties = rootProject.file("key.properties")
+         if (properties.exists())
+@@ -70,7 +74,7 @@ android {
+                 resValue(
+                     type = "string",
+                     name = "app_name",
+-                    value = "PiliPlus dev",
++                    value = "PiliPlus BTR DEV",
+                 )
+             }
+             proguardFiles(

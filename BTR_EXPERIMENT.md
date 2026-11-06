@@ -1,8 +1,8 @@
 # PiliPlus BTR Android 功能整合
 
-本專案是獨立的 Android DEV 工程。目前最新穩定使用版為 **PiliPlus-BTR-Upstream-20261027-01**（Build ID `upstream-20261027-01`），使用者於 2026-11-06 明確接受；APK 建置來源固定為 `790e357f661b935b5eb064d9affa54279b0c51a9`。`codex/btr-stable` 對應該建置來源，`codex/btr-accepted` 為後續上游同步的有效維護來源。完整穩定性、長時間播放、完整效能及原生資源驗收仍未完成。APK、來源及未解問題統一見 [開發資料索引](BTR_DEVELOPMENT_INDEX.md)、[版本清單](tool/btr_current_recommendation.json)與[接受紀錄](BTR_STABLE_ACCEPTANCE_20261106.md)。維護提交包含後續文件，不能當成原 APK 的建置 Commit。
+本專案是獨立的 Android DEV 工程。目前最新穩定使用版為 **PiliPlus-BTR-Upstream-20261027-01**（Build ID `upstream-20261027-01`），使用者於 2026-11-06 明確接受；APK 建置來源固定為 `790e357f661b935b5eb064d9affa54279b0c51a9`。`codex/btr-stable` 對應該建置來源，`codex/btr-accepted` 為後續上游同步的有效維護來源。完整穩定性、長時間播放、完整效能及原生資源驗收仍未完成。APK、來源及未解問題統一見 [開發資料索引](BTR_DEVELOPMENT_INDEX.md)、[版本清單](tools/legacy/btr_current_recommendation.json)與[接受紀錄](BTR_STABLE_ACCEPTANCE_20261106.md)。維護提交包含後續文件，不能當成原 APK 的建置 Commit。
 
-目前模組化候選的程式邊界與專屬設定介面見 [BTR_MODULES.md](BTR_MODULES.md)。候選不改變已接受維護來源或上述穩定使用版。
+目前分離來源候選的所有權與重組入口見 [BTR_SOURCES.md](BTR_SOURCES.md)；程式邊界與專屬設定介面見 [BTR_MODULES.md](BTR_MODULES.md)。候選不改變已接受維護來源或上述穩定使用版。
 
 下列各日期段落保留當時階段的設定與驗證紀錄；其中「未驗證」等結論只適用於該日期及該版本。現行版本與驗收範圍以上述索引為準；舊暫用版 `55fd75e41` 及歷史穩定基準 `788faa8abee2ff325205d89a9fa24869821685e3` 的固定標籤、APK 與證據繼續保留。
 
@@ -125,27 +125,9 @@ Switcher 的有效行為是先選 ALI-OV、提供 ALI/COS 與合格原始備援�
 
 ## 本機重現
 
-工具全部放在此專案。先 clone Flutter 3.47.7 至 `.toolchain/flutter`，以該私有 SDK 執行 `flutter pub get --enforce-lockfile`，並設定 `PUB_CACHE=<repo>/.toolchain/pub-cache`，再執行 `tool/btr_prepare.ps1` 套用上游既有 patch。
+目前工作樹以 PiliPlus／BTR／integration／tools 分離來源。依 [BTR_SOURCES.md](BTR_SOURCES.md) 先 Compose，再以相同版本、lock 與 patch 的既有工作樹 Setup，透過 `tools/btr.ps1` 執行核心、設定、分析、native 與 ARM64 DEV 建置。不要直接在純官方目錄建置 BTR，也不要修改生成來源作為永久修正。
 
-```powershell
-# 純 Dart 傳輸與政策測試：只連本機 Fake CDN
-./tool/btr_test.ps1
-
-# 靜態分析
-$env:PUB_CACHE = Join-Path $PWD '.toolchain/pub-cache'
-./.toolchain/flutter/bin/flutter.bat analyze --no-pub
-
-# ARM64 DEV APK；路徑參數為本機既有工具，沒有部署/安裝動作
-./tool/btr_build.ps1 -AndroidSdk '<existing SDK>' -JavaHome '<existing JDK>'
-```
-
-本機第一次 Gradle 出現 `Unable to establish loopback connection`；依任務規則，後續命令加入 `-ShortIpcPath`，由腳本計算 repo-local `.ipc` 並僅設定該程序的 `JAVA_TOOL_OPTIONS=-Djdk.net.unixdomain.tmpdir=...`。未更動 Windows TEMP/TMP、hosts 或 JDK。Flutter 自動選用既有 Android Studio JBR 21.0.10；`JavaHome` 供本機 DEV keytool/工具使用，不覆寫 Flutter 全域 JDK 設定。
-
-第二次建置進入 Java 編譯後，發現私有 Git 依賴 checkout 缺少超過 Windows 傳統長度限制的檔案：WebView 69 個、chat packages 2 個，範例完整路徑 267 字元。`tool/btr_repair_git_cache.ps1` 只補回私有快取內實際缺少的檔案，使用各自鎖定 HEAD 與 per-command `core.longpaths=true`，不覆蓋既有檔案、不升級依賴、不修改全域 Git。`btr_prepare.ps1` 已包含此步驟，缺檔清單與修復日誌保留在 evidence。
-
-傳輸測試 runner 位於 `tool/btr_tests`，有獨立 lockfile。它直接解析本 repo 的 production Dart files，沒有複製實作；只排除測試用不到的 Flutter/桌面 native import closure。根 pubspec 新增的 test_api/matcher 為原 lockfile 已有版本，不升級任何應用程式依賴。
-
-第一次完整 `flutter test` 在測試收集前，因上游 `cnativeapi` 需要 Windows MSVC 而失敗；停用 native assets 也被套件需求拒絕，兩次日誌都保留。沒有修改 cnativeapi 或全域工具鏈來掩蓋此結果。完整上游 Flutter/native suite 與 UI 執行驗收因此不是 PASS；純 Dart 傳輸測試及 Android APK 建置另列結果。
+SDK/cache 只重用已核對 inputs 的種子，不在共享 junction 執行 prepare/repair。IPC 症狀出現後才用候選短路徑重試。缺 MSVC 的完整 Flutter/native 測試不得用隔離 harness 結果代替。既有歷史驗證與問題請參閱本文件日期段落及個別交付報告。
 
 ## 後續 Android 人工驗收（本次未執行）
 

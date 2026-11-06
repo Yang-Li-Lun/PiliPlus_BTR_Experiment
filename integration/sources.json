@@ -1,0 +1,409 @@
+{
+  "schemaVersion": 1,
+  "upstreamCommit": "d680e3f95cf777ff20492dd2a23c89264481dca0",
+  "behaviorBaseline": "1f0d304a3e161e35980565b1088dc79c0717b424",
+  "apkCodeBaseline": "d30b2e0d3e6694fe13fece12f30034a257454848",
+  "upstreamUrl": "https://github.com/bggRGjQaUbCoE/PiliPlus.git",
+  "overlays": [
+    {
+      "source": "BTR/android/app/src/main/kotlin/com/example/piliplus/BtrDiagnosticsExport.kt",
+      "target": "android/app/src/main/kotlin/com/example/piliplus/BtrDiagnosticsExport.kt"
+    },
+    {
+      "source": "BTR/android/app/src/main/kotlin/com/example/piliplus/BtrVerifiedWrite.kt",
+      "target": "android/app/src/main/kotlin/com/example/piliplus/BtrVerifiedWrite.kt"
+    },
+    {
+      "source": "integration/overlay/android/app/src/main/res/xml/btr_network_security.xml",
+      "target": "android/app/src/main/res/xml/btr_network_security.xml"
+    },
+    {
+      "source": "BTR/lib/pages/setting/pages/btr_experiment.dart",
+      "target": "lib/pages/setting/pages/btr_experiment.dart"
+    },
+    {
+      "source": "BTR/lib/pages/setting/widgets/btr_monitor.dart",
+      "target": "lib/pages/setting/widgets/btr_monitor.dart"
+    },
+    {
+      "source": "BTR/lib/services/btr/buffer_ahead.dart",
+      "target": "lib/services/btr/buffer_ahead.dart"
+    },
+    {
+      "source": "integration/overlay/lib/services/btr/dash_sources.dart",
+      "target": "lib/services/btr/dash_sources.dart"
+    },
+    {
+      "source": "BTR/lib/services/btr/diagnostics.dart",
+      "target": "lib/services/btr/diagnostics.dart"
+    },
+    {
+      "source": "BTR/lib/services/btr/diagnostics_export.dart",
+      "target": "lib/services/btr/diagnostics_export.dart"
+    },
+    {
+      "source": "BTR/lib/services/btr/local_write_budget.dart",
+      "target": "lib/services/btr/local_write_budget.dart"
+    },
+    {
+      "source": "BTR/lib/services/btr/metrics.dart",
+      "target": "lib/services/btr/metrics.dart"
+    },
+    {
+      "source": "BTR/lib/services/btr/monitor_data.dart",
+      "target": "lib/services/btr/monitor_data.dart"
+    },
+    {
+      "source": "BTR/lib/services/btr/native_failure_hint.dart",
+      "target": "lib/services/btr/native_failure_hint.dart"
+    },
+    {
+      "source": "BTR/lib/services/btr/native_property.dart",
+      "target": "lib/services/btr/native_property.dart"
+    },
+    {
+      "source": "BTR/lib/services/btr/native_property_string.dart",
+      "target": "lib/services/btr/native_property_string.dart"
+    },
+    {
+      "source": "BTR/lib/services/btr/network.dart",
+      "target": "lib/services/btr/network.dart"
+    },
+    {
+      "source": "BTR/lib/services/btr/playback.dart",
+      "target": "lib/services/btr/playback.dart"
+    },
+    {
+      "source": "integration/overlay/lib/services/btr/player_integration.dart",
+      "target": "lib/services/btr/player_integration.dart"
+    },
+    {
+      "source": "BTR/lib/services/btr/policy.dart",
+      "target": "lib/services/btr/policy.dart"
+    },
+    {
+      "source": "BTR/lib/services/btr/proxy_capacity.dart",
+      "target": "lib/services/btr/proxy_capacity.dart"
+    },
+    {
+      "source": "BTR/lib/services/btr/proxy_diagnostics.dart",
+      "target": "lib/services/btr/proxy_diagnostics.dart"
+    },
+    {
+      "source": "BTR/lib/services/btr/read_recovery.dart",
+      "target": "lib/services/btr/read_recovery.dart"
+    },
+    {
+      "source": "BTR/lib/services/btr/scheduler.dart",
+      "target": "lib/services/btr/scheduler.dart"
+    },
+    {
+      "source": "BTR/lib/services/btr/settings.dart",
+      "target": "lib/services/btr/settings.dart"
+    },
+    {
+      "source": "BTR/lib/services/btr/settings_controller.dart",
+      "target": "lib/services/btr/settings_controller.dart"
+    },
+    {
+      "source": "integration/overlay/lib/services/btr/settings_service.dart",
+      "target": "lib/services/btr/settings_service.dart"
+    },
+    {
+      "source": "BTR/lib/services/btr/surface_probe.dart",
+      "target": "lib/services/btr/surface_probe.dart"
+    },
+    {
+      "source": "BTR/lib/services/btr/transport.dart",
+      "target": "lib/services/btr/transport.dart"
+    },
+    {
+      "source": "BTR/lib/services/btr/ui/diagnostics_panel.dart",
+      "target": "lib/services/btr/ui/diagnostics_panel.dart"
+    },
+    {
+      "source": "BTR/lib/services/btr/ui/settings_panel.dart",
+      "target": "lib/services/btr/ui/settings_panel.dart"
+    },
+    {
+      "source": "integration/overlay/lib/services/playback_seek_intent.dart",
+      "target": "lib/services/playback_seek_intent.dart"
+    },
+    {
+      "source": "integration/overlay/lib/services/playback_source_sequence.dart",
+      "target": "lib/services/playback_source_sequence.dart"
+    },
+    {
+      "source": "integration/overlay/lib/services/playback_task_scope.dart",
+      "target": "lib/services/playback_task_scope.dart"
+    },
+    {
+      "source": "integration/overlay/lib/services/player_disposal.dart",
+      "target": "lib/services/player_disposal.dart"
+    },
+    {
+      "source": "BTR/test/btr/audio_task_removed_flutter.dart",
+      "target": "test/btr/audio_task_removed_flutter.dart"
+    },
+    {
+      "source": "BTR/test/btr/buffer_ahead_test.dart",
+      "target": "test/btr/buffer_ahead_test.dart"
+    },
+    {
+      "source": "BTR/test/btr/controller_recovery_test.dart",
+      "target": "test/btr/controller_recovery_test.dart"
+    },
+    {
+      "source": "BTR/test/btr/dash_sources_test.dart",
+      "target": "test/btr/dash_sources_test.dart"
+    },
+    {
+      "source": "BTR/test/btr/demand_lifecycle_test.dart",
+      "target": "test/btr/demand_lifecycle_test.dart"
+    },
+    {
+      "source": "BTR/test/btr/diagnostics_export_flutter.dart",
+      "target": "test/btr/diagnostics_export_flutter.dart"
+    },
+    {
+      "source": "BTR/test/btr/diagnostics_test.dart",
+      "target": "test/btr/diagnostics_test.dart"
+    },
+    {
+      "source": "BTR/test/btr/fake_cdn.dart",
+      "target": "test/btr/fake_cdn.dart"
+    },
+    {
+      "source": "BTR/test/btr/local_write_budget_test.dart",
+      "target": "test/btr/local_write_budget_test.dart"
+    },
+    {
+      "source": "BTR/test/btr/native_failure_hint_test.dart",
+      "target": "test/btr/native_failure_hint_test.dart"
+    },
+    {
+      "source": "BTR/test/btr/native_property_string_test.dart",
+      "target": "test/btr/native_property_string_test.dart"
+    },
+    {
+      "source": "BTR/test/btr/playback_seek_intent_test.dart",
+      "target": "test/btr/playback_seek_intent_test.dart"
+    },
+    {
+      "source": "BTR/test/btr/playback_source_sequence_test.dart",
+      "target": "test/btr/playback_source_sequence_test.dart"
+    },
+    {
+      "source": "BTR/test/btr/playback_task_scope_test.dart",
+      "target": "test/btr/playback_task_scope_test.dart"
+    },
+    {
+      "source": "BTR/test/btr/player_diagnostics_test.dart",
+      "target": "test/btr/player_diagnostics_test.dart"
+    },
+    {
+      "source": "BTR/test/btr/policy_scheduler_test.dart",
+      "target": "test/btr/policy_scheduler_test.dart"
+    },
+    {
+      "source": "BTR/test/btr/proxy_capacity_test.dart",
+      "target": "test/btr/proxy_capacity_test.dart"
+    },
+    {
+      "source": "BTR/test/btr/proxy_diagnostics_test.dart",
+      "target": "test/btr/proxy_diagnostics_test.dart"
+    },
+    {
+      "source": "BTR/test/btr/proxy_fairness_test.dart",
+      "target": "test/btr/proxy_fairness_test.dart"
+    },
+    {
+      "source": "BTR/test/btr/read_recovery_test.dart",
+      "target": "test/btr/read_recovery_test.dart"
+    },
+    {
+      "source": "BTR/test/btr/reopen_lifecycle_test.dart",
+      "target": "test/btr/reopen_lifecycle_test.dart"
+    },
+    {
+      "source": "BTR/test/btr/seek_scheduling_test.dart",
+      "target": "test/btr/seek_scheduling_test.dart"
+    },
+    {
+      "source": "BTR/test/btr/settings_monitor_test.dart",
+      "target": "test/btr/settings_monitor_test.dart"
+    },
+    {
+      "source": "BTR/test/btr/settings_page_flutter.dart",
+      "target": "test/btr/settings_page_flutter.dart"
+    },
+    {
+      "source": "BTR/test/btr/source_retirement_test.dart",
+      "target": "test/btr/source_retirement_test.dart"
+    },
+    {
+      "source": "BTR/test/btr/surface_probe_test.dart",
+      "target": "test/btr/surface_probe_test.dart"
+    },
+    {
+      "source": "BTR/test/btr/task_removal_transport_test.dart",
+      "target": "test/btr/task_removal_transport_test.dart"
+    },
+    {
+      "source": "BTR/test/btr/transport_test.dart",
+      "target": "test/btr/transport_test.dart"
+    },
+    {
+      "source": "BTR/third_party/BTR-LICENSE.txt",
+      "target": "third_party/BTR-LICENSE.txt"
+    }
+  ],
+  "patches": [
+    {
+      "target": "android/app/build.gradle.kts",
+      "source": "integration/patches/android/app/build.gradle.kts.patch",
+      "baseBlob": "e3f25c4e1d0a0e8fc78e511af511ccc1c5c91d88"
+    },
+    {
+      "target": "android/app/src/main/AndroidManifest.xml",
+      "source": "integration/patches/android/app/src/main/AndroidManifest.xml.patch",
+      "baseBlob": "7b6e8fbb902773601123521eae640ff958c1d63a"
+    },
+    {
+      "target": "android/app/src/main/kotlin/com/example/piliplus/MainActivity.kt",
+      "source": "integration/patches/android/app/src/main/kotlin/com/example/piliplus/MainActivity.kt.patch",
+      "baseBlob": "170ed81c4ab0f3f82694abc9dc72a57e7d26b520"
+    },
+    {
+      "target": "android/app/src/main/res/values/string.xml",
+      "source": "integration/patches/android/app/src/main/res/values/string.xml.patch",
+      "baseBlob": "cf338c23037a237a15429b68761882610b424c3c"
+    },
+    {
+      "target": "android/app/src/main/res/xml-v25/shortcuts.xml",
+      "source": "integration/patches/android/app/src/main/res/xml-v25/shortcuts.xml.patch",
+      "baseBlob": "8d83c72a854c5f45525991cce0fae60e0a9f6ca6"
+    },
+    {
+      "target": "lib/common/widgets/image_viewer/gallery_viewer.dart",
+      "source": "integration/patches/lib/common/widgets/image_viewer/gallery_viewer.dart.patch",
+      "baseBlob": "d1ce243d84fcd0069ea5e22a20ff81ea6b4c4c37"
+    },
+    {
+      "target": "lib/pages/audio/controller.dart",
+      "source": "integration/patches/lib/pages/audio/controller.dart.patch",
+      "baseBlob": "4878d7edc359e63f943d4f7d9c793f99664af0cb"
+    },
+    {
+      "target": "lib/pages/setting/models/play_settings.dart",
+      "source": "integration/patches/lib/pages/setting/models/play_settings.dart.patch",
+      "baseBlob": "ae0d6cfb1ffaddd51f35c3dc3173f3185f394995"
+    },
+    {
+      "target": "lib/pages/video/controller.dart",
+      "source": "integration/patches/lib/pages/video/controller.dart.patch",
+      "baseBlob": "b76dbadeccfab26d1f4b257c9adf11d359ff15e9"
+    },
+    {
+      "target": "lib/pages/video/widgets/header_control.dart",
+      "source": "integration/patches/lib/pages/video/widgets/header_control.dart.patch",
+      "baseBlob": "588334a60d1b84b5926b30563d1cac8f14906faf"
+    },
+    {
+      "target": "lib/plugin/pl_player/controller.dart",
+      "source": "integration/patches/lib/plugin/pl_player/controller.dart.patch",
+      "baseBlob": "fb98ecf3d2c6eb59326102e133ca8c8b6df5bfa6"
+    },
+    {
+      "target": "lib/plugin/pl_player/models/data_source.dart",
+      "source": "integration/patches/lib/plugin/pl_player/models/data_source.dart.patch",
+      "baseBlob": "98edc3449f5391a06c14dc038f9991643bd49f43"
+    },
+    {
+      "target": "lib/plugin/pl_player/view/view.dart",
+      "source": "integration/patches/lib/plugin/pl_player/view/view.dart.patch",
+      "baseBlob": "e44e288a67eadbbc94baa8b1a86adb1813dcadb1"
+    },
+    {
+      "target": "lib/services/audio_handler.dart",
+      "source": "integration/patches/lib/services/audio_handler.dart.patch",
+      "baseBlob": "283693853e593b8645cf182241ad57966e669026"
+    },
+    {
+      "target": "pubspec.lock",
+      "source": "integration/patches/pubspec.lock.patch",
+      "baseBlob": "2e0592fef7620b73cff97eecd19947602bb37c07"
+    },
+    {
+      "target": "pubspec.yaml",
+      "source": "integration/patches/pubspec.yaml.patch",
+      "baseBlob": "35c3a38e33cf7b4d7bf98c8e34d551016377e42b"
+    }
+  ],
+  "tools": [
+    {
+      "source": "tools/legacy/btr_build.ps1",
+      "target": "tool/btr_build.ps1"
+    },
+    {
+      "source": "tools/legacy/btr_candidate_setup.ps1",
+      "target": "tool/btr_candidate_setup.ps1"
+    },
+    {
+      "source": "tools/legacy/btr_current_recommendation.json",
+      "target": "tool/btr_current_recommendation.json"
+    },
+    {
+      "source": "tools/legacy/btr_diagnostics_flutter_test.ps1",
+      "target": "tool/btr_diagnostics_flutter_test.ps1"
+    },
+    {
+      "source": "tools/legacy/btr_prepare.ps1",
+      "target": "tool/btr_prepare.ps1"
+    },
+    {
+      "source": "tools/legacy/btr_repair_git_cache.ps1",
+      "target": "tool/btr_repair_git_cache.ps1"
+    },
+    {
+      "source": "tools/btr_sync_tests.ps1",
+      "target": "tool/btr_sync_tests.ps1"
+    },
+    {
+      "source": "tools/btr_sync_upstream.ps1",
+      "target": "tool/btr_sync_upstream.ps1"
+    },
+    {
+      "source": "tools/legacy/btr_test.ps1",
+      "target": "tool/btr_test.ps1"
+    },
+    {
+      "source": "tools/legacy/btr_tests/pubspec.lock",
+      "target": "tool/btr_tests/pubspec.lock"
+    },
+    {
+      "source": "tools/legacy/btr_tests/pubspec.yaml",
+      "target": "tool/btr_tests/pubspec.yaml"
+    },
+    {
+      "source": "tools/legacy/btr_tests/transfer_comparison.dart",
+      "target": "tool/btr_tests/transfer_comparison.dart"
+    },
+    {
+      "source": "tools/legacy/btr_tests/verified_write_test.kt",
+      "target": "tool/btr_tests/verified_write_test.kt"
+    },
+    {
+      "source": "tools/legacy/btr_upstream.json",
+      "target": "tool/btr_upstream.json"
+    },
+    {
+      "source": "tools/legacy/btr_verified_write_test.ps1",
+      "target": "tool/btr_verified_write_test.ps1"
+    },
+    {
+      "source": "tools/legacy/btr_verify_features.ps1",
+      "target": "tool/btr_verify_features.ps1"
+    }
+  ]
+}

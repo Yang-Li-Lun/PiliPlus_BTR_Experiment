@@ -1,0 +1,18 @@
+diff --git a/lib/plugin/pl_player/models/data_source.dart b/lib/plugin/pl_player/models/data_source.dart
+index 98edc3449f5391a06c14dc038f9991643bd49f43..760fa7e54c0236ba1a023fea4500cbda0eb8c225 100644
+--- a/lib/plugin/pl_player/models/data_source.dart
++++ b/lib/plugin/pl_player/models/data_source.dart
+@@ -12,9 +12,13 @@ sealed class DataSource {
+ }
+ 
+ class NetworkSource extends DataSource {
++  final List<String> videoCandidates;
++  final List<String> audioCandidates;
+   NetworkSource({
+     required super.videoSource,
+     required super.audioSource,
++    this.videoCandidates = const [],
++    this.audioCandidates = const [],
+   });
+ }
+ 

@@ -1,1 +1,7 @@
-*.patch text eol=lf
+# Preserve pinned Git blob bytes across Windows checkouts.
+PiliPlus/** -text
+BTR/** -text
+integration/overlay/** -text
+integration/patches/** -text
+integration/sources.json text eol=lf
+tools/** text eol=lf

@@ -158,3 +158,10 @@ test*
 evidence/
 .ipc/
 .btr-wt/
+
+# Generated composition and candidate-only outputs
+/.assembled/
+/.scratch/
+__pycache__/
+!/tools/test_sources.py
+!/tools/test_separated_sync.py

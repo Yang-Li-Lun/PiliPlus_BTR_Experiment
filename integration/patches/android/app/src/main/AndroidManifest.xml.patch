@@ -1,0 +1,21 @@
+diff --git a/android/app/src/main/AndroidManifest.xml b/android/app/src/main/AndroidManifest.xml
+index 7b6e8fbb902773601123521eae640ff958c1d63a..ca4240e367b78a81be9fd9f15c0654fa95383e6f 100644
+--- a/android/app/src/main/AndroidManifest.xml
++++ b/android/app/src/main/AndroidManifest.xml
+@@ -42,6 +42,7 @@
+         android:fullBackupContent="false"
+         android:icon="@mipmap/ic_launcher"
+         android:label="@string/app_name"
++        android:networkSecurityConfig="@xml/btr_network_security"
+         tools:replace="android:allowBackup">
+         <meta-data
+             android:name="io.flutter.embedding.android.EnableImpeller"
+@@ -106,7 +107,7 @@
+             <intent-filter android:label="PiliPlus">
+                 <action android:name="android.intent.action.VIEW" />
+                 <action android:name="android.intent.action.SEARCH" />
+-                <action android:name="com.example.piliplus.SHORTCUT" />
++                <action android:name="com.example.piliplus.btr.experiment.SHORTCUT" />
+ 
+                 <category android:name="android.intent.category.DEFAULT" />
+                 <category android:name="android.intent.category.BROWSABLE" />

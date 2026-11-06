@@ -1,16 +1,16 @@
 # BTR 模組與上游適配邊界
 
-BTR 使用現有 Dart 模組，不另建 package。傳輸核心維持既有實作及檔名，避免上游合併時混入無關移動。`BtrExperimentPage` 是共用路由；設定 → 播放設定及播放器更多選單只保留入口，播放畫面 overlay 為唯讀監控。
+BTR 維持既有七類職責，不另建 Dart package。實體來源分為 PiliPlus／BTR／integration／tools，所有權與重組流程見 [BTR_SOURCES.md](BTR_SOURCES.md)。表內路徑為可編輯來源，組合後保持原 Flutter 路徑與 import。`BtrExperimentPage` 是共用路由；設定 → 播放設定及播放器更多選單只保留入口，播放畫面 overlay 為唯讀監控。
 
 | 職責 | 實作 | 所有權與契約 |
 | --- | --- | --- |
-| Transport | `lib/services/btr/transport.dart`、`network.dart`、`scheduler.dart`、`proxy_capacity.dart`、`local_write_budget.dart` | Range、ETag、排程、Hedge、重試／續傳、loopback 回應及容量；影音各自固定來源與有序視窗，共用上游請求預算 |
-| CDN | `lib/services/btr/policy.dart` | 合格來源、偏好次序、HTTPS、MCDN／P2P 過濾；驗證由 network／transport 執行，禁止跨來源拼接 |
-| Playback | `lib/services/btr/playback.dart`、`read_recovery.dart`、`buffer_ahead.dart` | 每次播放的不可變設定、傳輸 session、播放器事件量測、取消與關閉；共用 task scope 仍使用 `lib/services/playback_task_scope.dart` |
-| Settings | `lib/services/btr/settings.dart`、`settings_controller.dart`、`settings_service.dart`、`ui/settings_panel.dart` | 模型／遷移、序列化儲存與通知、唯一 Hive binding、完整專屬控制介面；不依賴播放 Session 寫入設定 |
-| Diagnostics | `lib/services/btr/metrics.dart`、`diagnostics.dart`、`diagnostics_export.dart`、`proxy_diagnostics.dart`、`monitor_data.dart`、`surface_probe.dart`、`ui/diagnostics_panel.dart` | 有界記錄與匯出；唯讀顯示沿用 `lib/pages/setting/widgets/btr_monitor.dart`，不新增探測或播放器輪詢 |
-| Android | `android/app/src/main/kotlin/com/example/piliplus/BtrDiagnosticsExport.kt`、`BtrVerifiedWrite.kt`、`lib/services/btr/native_property.dart` | 既有 SAF 匯出／覆讀核對、原生屬性介接；MainActivity 保留插件登錄及 AudioService engine 所有權，network security 僅允許 loopback HTTP |
-| PiliPlus Adapter | `lib/services/btr/dash_sources.dart`、`player_integration.dart` | 前者擷取已選定 DASH representation 的原始完整 URL，再呼叫上游 CDN selector；後者為 `PlPlayerController` 的私有 part/extension，接合來源開啟、原生 EDL、Seek、恢復、EOF 與診斷 hook |
+| Transport | `BTR/lib/services/btr/transport.dart`、`network.dart`、`scheduler.dart`、`proxy_capacity.dart`、`local_write_budget.dart` | Range、ETag、排程、Hedge、重試／續傳、loopback 回應及容量；影音各自固定來源與有序視窗，共用上游請求預算 |
+| CDN | `BTR/lib/services/btr/policy.dart` | 合格來源、偏好次序、HTTPS、MCDN／P2P 過濾；驗證由 network／transport 執行，禁止跨來源拼接 |
+| Playback | `BTR/lib/services/btr/playback.dart`、`read_recovery.dart`、`buffer_ahead.dart` | 每次播放的不可變設定、傳輸 session、播放器事件量測、取消與關閉；共用 task scope 仍使用 `integration/overlay/lib/services/playback_task_scope.dart` |
+| Settings | `BTR/lib/services/btr/settings.dart`、`settings_controller.dart`、`ui/settings_panel.dart`；`integration/overlay/lib/services/btr/settings_service.dart` | 模型／遷移、序列化儲存與通知、唯一 Hive binding、完整專屬控制介面；不依賴播放 Session 寫入設定 |
+| Diagnostics | `BTR/lib/services/btr/metrics.dart`、`diagnostics.dart`、`diagnostics_export.dart`、`proxy_diagnostics.dart`、`monitor_data.dart`、`surface_probe.dart`、`ui/diagnostics_panel.dart` | 有界記錄與匯出；唯讀顯示沿用 `BTR/lib/pages/setting/widgets/btr_monitor.dart`，不新增探測或播放器輪詢 |
+| Android | `BTR/android/app/src/main/kotlin/com/example/piliplus/BtrDiagnosticsExport.kt`、`BtrVerifiedWrite.kt`、`BTR/lib/services/btr/native_property.dart` | 既有 SAF 匯出／覆讀核對、原生屬性介接；MainActivity 保留插件登錄及 AudioService engine 所有權，network security 僅允許 loopback HTTP |
+| PiliPlus Adapter | `integration/overlay/lib/services/btr/dash_sources.dart`、`player_integration.dart` | 前者擷取已選定 DASH representation 的原始完整 URL，再呼叫上游 CDN selector；後者為 `PlPlayerController` 的私有 part/extension，接合來源開啟、原生 EDL、Seek、恢復、EOF 與診斷 hook |
 
 ## 狀態與生命週期
 
@@ -28,10 +28,8 @@ BTR 使用現有 Dart 模組，不另建 package。傳輸核心維持既有實�
 
 ## 同步新版時的審查入口
 
-依 `BTR_UPSTREAM.md` 使用 `tool/btr_sync_upstream.ps1`。預設來源仍為 `codex/btr-accepted`；本模組化候選未接受前，不會自動成為預設來源。明確接續本候選時使用 `-SourceRef codex/btr-modular-20261106-01`；必須另行獲得接受授權才執行 AcceptCandidate。
+依 [BTR_UPSTREAM.md](BTR_UPSTREAM.md) 使用 `tools/btr_sync_upstream.ps1`。預設仍是 `codex/btr-accepted`；明確接續本分離候選使用 `-SourceRef codex/btr-separated-20261106-01`。接受必須另外獲得使用者授權。
 
-三方審查重點：`lib/pages/video/controller.dart` 的 `_dashUrl` 與 NetworkSource 候選、`lib/plugin/pl_player/controller.dart` 的適配呼叫／共享欄位／dispose，以及 `player_integration.dart` 的原生 open/seek 契約。設定入口、overlay、AudioService task removal、MainActivity engine 與 manifest 是其餘已知整合點。此結構減少散落的 BTR 程式，不能保證任意上游更新零衝突。
+16 個官方檔案修改位於 `integration/patches/`，逐檔目標、依賴與審查重點見 [CONTACTS](integration/CONTACTS.md)。官方原件位於 `PiliPlus/`；DASH、播放器私有 part、Hive binding 與共用生命周期 helpers 位於 `integration/overlay/`。分離所有權沒有建立第二個播放器狀態機，也不保證任意上游更新零衝突。
 
-架構變更先獨立提交，再把該 SHA 當作 `btr_verify_features.ps1 -BtrRef` 的來源。驗證器的 tripwire 追蹤新邊界，但仍要求上游未觸及的 BTR 檔與來源相同；不要把合法架構差異錯列成上游同步的自動例外。
-
-離線驗證：`tool/btr_test.ps1`、`tool/btr_diagnostics_flutter_test.ps1 -IncludeSettings`、Flutter analyze、`tool/btr_sync_tests.ps1`。設定 UI／channel harness 使用正式 Dart 實作及既有 patched Material UI，避開不相關的 Windows native assets；不等同 Android SAF、實際播放或實機 UI 驗收。
+離線驗證使用 `tools/btr.ps1` 的 Core、Settings、Analyze、Native、VerifiedWrite 與 Build；測試原件在 `BTR/test/btr/`。`tools/btr_sources.py verify --baseline` 檢查本次組合結果與模組化來源的 blob 完全相同。設定 UI／channel harness 不等於 Android SAF、實際播放或裝置 UI 驗收。

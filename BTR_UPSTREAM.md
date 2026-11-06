@@ -1,94 +1,54 @@
 # BTR 上游同步
 
-目前最新穩定使用版為 **PiliPlus-BTR-Upstream-20261027-01**，已於 2026-11-06 依使用者明確決定接受。APK 建置來源為 `790e357f661b935b5eb064d9affa54279b0c51a9`；`codex/btr-stable` 指向該建置來源，`codex/btr-accepted` 指向含接受文件的維護來源。完整定位見 [接受紀錄](BTR_STABLE_ACCEPTANCE_20261106.md)及[版本清單](tool/btr_current_recommendation.json)。
+目前最新穩定使用版仍為 **PiliPlus-BTR-Upstream-20261027-01**。`codex/btr-stable` 為 APK 建置來源 `790e357f661b935b5eb064d9affa54279b0c51a9`，`codex/btr-accepted` 為維護來源 `184c1fe8ea5649593d0dcedda1b420e101bcc2b4`。見 [接受紀錄](BTR_STABLE_ACCEPTANCE_20261106.md)及[版本清單](tools/legacy/btr_current_recommendation.json)。分離候選未接受、未提升穩定版。
 
-目前有效工具工作樹為 repository 根目錄下 `.btr-wt/up-1027-01`；後續同步在此使用新版工具。2026-10-27 [交付紀錄](BTR_MAINTENANCE_RESULT_20261027.md)及 artifact.json 的未接受狀態是當時紀錄，現行狀態以上述接受紀錄為準。
+唯一官方上游是 https://github.com/bggRGjQaUbCoE/PiliPlus.git 的 main。Android BTR 自行維護，不追蹤／自動移植 Bilibili-thread-ripper；MIT notices 保留。`main` 含 BTR，不能當純官方來源。
 
-唯一持續同步的上游是 PiliPlus 官方 main：https://github.com/bggRGjQaUbCoE/PiliPlus.git。
-Android BTR 為本專案自行維護，不追蹤或自動移植 Bilibili-thread-ripper 更新；原 MIT notices 保留。
+## 來源與候選
 
-## 維護來源
+設定在 `tools/legacy/btr_upstream.json`。requiredFeatures 固定為 `55fd75e41ae518c0330a11ea646ddf8b8b2bcae2`；預設使用 acceptedSource。bootstrapSource 僅供尚未建立接受 ref 的初始化。未接受候選只有明確指定 SourceRef 才能接續。
 
-tool/btr_upstream.json 的 requiredFeatures 固定完整功能基準 55fd75e41ae518c0330a11ea646ddf8b8b2bcae2。
-acceptedSource（codex/btr-accepted）已建立；後續同步預設從該 ref 建立候選，必須包含它及 requiredFeatures。bootstrapSource：btr-user-trial-20261027-55fd75e41 僅供尚未建立接受來源的初始化，不是目前預設版本。
-接受來源固定標籤為 btr-maintenance-accepted-20261106-up-1027-01；審查前候選 HEAD c687c98aa290cafc8a36751b00fb7d18a10eb0b0 另由 btr-accepted-candidate-20261106-up-1027-01 保留。
-codex/btr-maintenance 為保留的舊維護線，不是建議 APK 來源；main 也包含 BTR，不是純上游。
-同步工具與 AcceptCandidate 本身不提升 codex/btr-stable、不變更 tool/btr_current_recommendation.json；本次穩定分支與版本清單提升依使用者另外明確指定穩定使用版的授權完成。
-未接受候選只能在明確指定 SourceRef 時接續。測試與建置通過不是 Android 驗收或使用者接受。
+分離來源與重組入口見 [BTR_SOURCES.md](BTR_SOURCES.md)。舊已接受工作樹 `.btr-wt/up-1027-01` 繼續使用自己的 `tool/btr_sync_upstream.ps1`；本候選在根目錄使用：
 
-## 程式碼邊界
+```powershell
+# 預設仍從 accepted 建候選，保留來源的原 layout。
+pwsh -NoProfile -File tools/btr_sync_upstream.ps1 -RunId <唯一短名稱>
+# 明確延續未接受的分離架構，不等於接受。
+pwsh -NoProfile -File tools/btr_sync_upstream.ps1 -SourceRef codex/btr-separated-20261106-01 -RunId <唯一短名稱> -Python '<python.exe>'
+```
 
-政策、CDN 身分驗證、排程、Range/ETag、取消、容量、監控及設定集中在 lib/services/btr/。
-player_integration.dart 是 PlPlayerController library 的私有 part/extension，集中來源開啟、原生 EDL、Seek／refresh、terminal、read-stall、native error、EOF 校正與 seek resume。
-它仍共享 controller 的來源序號、Seek 意圖及生命週期，不是獨立播放器或另一套狀態機。
-controller 持有共用欄位、來源佇列與生命週期；公開 seek/refresh 直接轉接私有適配方法，play/dispose 及一般播放器功能留在 controller，保持 native stop → retire GET → reopen、最新 Seek 意圖及原始模式契約。
-設定模型、儲存通知與 UI 已獨立於播放 Session；完整模組、設定語意及上游適配清單見 [BTR_MODULES.md](BTR_MODULES.md)。本架構候選未自動更新已接受來源。
-播放與事件 hook、影音候選擷取、設定入口、overlay、AudioService task removal 仍須三方審查。
-不建立新 repository/package，不放寬 8 個 HTTP 回應、4 個執行槽、16 個上游連線及清理保護。
+先讀 AGENTS.md、本文件、BTR_EXPERIMENT.md、BTR_DEVELOPMENT_INDEX.md、版本清單與實際 Git 狀態。候選必須包含 requiredFeatures 及目前 accepted 祖先；於 repository 根的 `.btr-wt/<RunId>` 建 sibling worktree，分支為 `codex/btr-update-<RunId>`。既有路徑、ref、run 證據拒絕覆用。
 
-## 建立候選
+來源與工具 checkout 同 layout 時，只攜帶已提交的維護工具與文件；未提交工具先另行提交，分歧則停止。不同 layout 時保留來源自己的工具及文件，避免默默遷移已接受版。其他 owner 未提交／未追蹤檔不 stash、不搬移、不清除。
 
-在最新維護工具所在的新候選工作樹，先讀 AGENTS.md、本文件、BTR_EXPERIMENT.md、BTR_DEVELOPMENT_INDEX.md、版本清單及實際 Git 狀態。
+## 官方樹與 Integration 更新
 
-~~~powershell
-pwsh -NoProfile -File .\tool\btr_sync_upstream.ps1 -RunId <唯一短名稱>
-~~~
+只 fetch 官方 main，不 fetch tags、不 prune、不 force。純上游鏡像僅 fast-forward；保留 `btr-pre-sync-<RunId>` 及 `evidence/upstream-sync/<RunId>/sync.json`。本次分離工程沒有執行實際官方同步。
 
-預設從已接受來源建立 codex/btr-update-<RunId>，工作樹固定為本 repository 的 .btr-wt/<RunId>，不逐層巢狀。
-當工具 checkout 比來源新，只帶入已提交的維護文件與 tool；應用功能仍來自接受來源。來源較新時保留其工具，分歧則停止審查。
-未提交工具需先在新候選提交；其他 owner 未提交檔不 stash、不搬移、不清除。
-明確接續未接受候選時加 -SourceRef <候選分支或固定SHA>；不得因此提升接受來源。
+來源為原 layout 時沿用既有 merge。來源含 `integration/sources.json` 時，以 Git subtree merge 把官方根樹映射到 `PiliPlus/`，保留官方與 BTR 祖先。衝突保留 index／MERGE_HEAD，讀 base/ours/theirs 後精確 stage，不整檔選 ours/theirs、不自動 abort。
 
-只 fetch 官方 main，不抓 tags、不 prune、不強制更新；純上游鏡像只允許 fast-forward。
-保留 btr-pre-sync-<RunId>、evidence/upstream-sync/<RunId>/sync.json。已有 ref、路徑或 run 拒絕覆用。
-衝突保留 index/MERGE_HEAD，讀 base/ours/theirs 後精確 stage，不整檔選 ours/theirs、不自動 abort。
-驗證 source 和 upstream 都是候選祖先。
+無 merge 衝突後，更新官方 pin 並比較 16 個 integration patch 的 base blobs。任何目標被上游更動、刪除或改名，都記為 `INTEGRATION_REVIEW_REQUIRED` 並停止，保留未完成 merge、舊 patch 與新官方來源。即使 patch 可能乾淨套用，也必須審查舊官方／新官方／現有 patch；不能只換 baseBlob 規避審查。新增檔與 overlay 碰撞、官方樹不符或組合失敗也停止。
 
-## 驗證與工具鏈
+未觸及整合接點時，先組合 `.assembled/upstream-review/`，通過後提交 merge。重複同步相同 pin 不產生額外 merge 或 manifest 修改。source 與 upstream 必須是候選祖先；不移動 accepted 或 stable。
 
-~~~powershell
-pwsh -NoProfile -File .\tool\btr_verify_features.ps1 -BtrRef <sourceCommit> -UpstreamRef <upstreamCommit>
-pwsh -NoProfile -File .\tool\btr_candidate_setup.ps1 -SeedRoot <本專案種子工作樹>
-~~~
+接點審查後修改最小 patch、更新其 baseBlob，必要時調整 overlay／manifest，再組合並完成測試與 ARM64 DEV APK。MERGE_HEAD 存在時，精確 stage 並提交 merge 後再驗證。SDK／lock／patch inputs 改變時須準備獨立工具鏈；不修改種子、全域設定或原有依賴 checkout。
 
-verify 僅為結構警報；沒被上游修改的 BTR 檔案須等同來源。架構整理先獨立提交，再用其 SHA 作同步來源。
-CDN 審查追蹤選定 DASH representation → 原始完整 URL 候選 → NetworkSource → BtrPlayback → 單一驗證來源。
-不得把改寫 host 後的簽章當成內容身分證明，不放寬 Range、ETag 或單來源固定規則。
+## 驗證與交付
 
-setup 僅在 .fvmrc、pubspec、lock 與 patches 一致時重用 SDK/cache。
-不同時在候選 .toolchain 準備獨立 SDK/Pub cache，依新上游 Android patch 清單核對並使用 btr_prepare.ps1。
-不得修改種子 SDK、全域設定、既有依賴 checkout 或原 PiliPlus 目錄；保留既有 DEV key，缺 key 時建置停止。
-只複製候選需要的快取，記錄來源版本，不執行會 reset SDK 的上游 helper。
+分離架構使用 `tools/btr.ps1` 的 Compose／Setup／Core／Settings／Analyze／Native／VerifiedWrite／Build。完整命令與 inputs 核對見 [BTR_SOURCES.md](BTR_SOURCES.md)。來源回歸：`python tools/test_sources.py`；既有同步安全：`pwsh -File tools/btr_sync_tests.ps1`；分離同步：`python tools/test_separated_sync.py`。同步測試只使用本機 disposable Git fixtures。
 
-~~~powershell
-$env:PUB_CACHE = Join-Path (Get-Location) '.toolchain/pub-cache'
-$env:CI = 'true'
-& .\.toolchain\flutter\bin\flutter.bat pub get --enforce-lockfile
-pwsh -NoProfile -File .\tool\btr_test.ps1
-& .\.toolchain\flutter\bin\flutter.bat analyze --no-pub --no-fatal-infos lib test
-& .\.toolchain\flutter\bin\flutter.bat test --no-pub test/btr/audio_task_removed_flutter.dart
-pwsh -NoProfile -File .\tool\btr_diagnostics_flutter_test.ps1 -IncludeSettings
-pwsh -NoProfile -File .\tool\btr_verified_write_test.ps1 -JavaHome <JDK>
-pwsh -NoProfile -File .\tool\btr_build.ps1 -AndroidSdk <SDK> -JavaHome <JDK> -DeviceTest -BuildId <RunId>
-~~~
+舊 `btr_verify_features.ps1` tripwire 保留在 `tools/legacy/`，只適用原 layout 的 Git checkout；分離來源改以 pin／manifest／逐檔 blob 與組合驗證，不能在生成目錄誤用外層 Git root。位元組／結構驗證與 APK 成功不是實機驗收。
 
-DeviceTest 僅啟用 55fd 既有 DEV 診斷編譯旗標，不操作裝置。
-只有實際遇到 loopback/PipeImpl/UnixDomainSockets/Invalid argument: connect，才以 -ShortIpcPath 重試並另存日誌。
-不改 TEMP/TMP、hosts、Android source 或 JDK。cnativeapi/MSVC 阻擋留失敗日誌，不記 PASS。
-用 aapt dump badging、apksigner verify --print-certs 核對 DEV applicationId、ARM64、既有 certificate。
-交付至候選 build/btr-candidates/<RunId>/，記錄 SHA-256、大小、build/source/upstream SHA；不覆寫舊 APK。
+不得放寬 8 HTTP 回應、4 執行槽、16 上游請求、Range/ETag、單來源固定、HTTPS、MCDN/P2P 或清理保護。DeviceTest 只是既有診斷編譯旗標，不操作裝置。僅遇到 AGENTS.md 指定 IPC 症狀後，才使用 repo-local 短路徑；不改 TEMP/TMP、hosts、Android source 或 JDK。MSVC 阻擋保留日誌，不列 PASS。
 
-## 接受與後續使用
+以 aapt／apksigner 核對 DEV applicationId、ARM64 及既有 certificate。APK 另存唯一 `build/btr-candidates/<RunId>/`，紀錄 SHA-256、大小、source/upstream SHA、fingerprint 與未接受狀態。實際 CDN、Seek／音畫、SAF、長時播放與原生資源未執行時維持 NOT RUN／UNVERIFIED／UNRESOLVED。
 
-只有使用者另行明確接受後，從乾淨、已審查候選 checkout 執行：
+## 接受
 
-~~~powershell
-pwsh -NoProfile -File .\tool\btr_sync_upstream.ps1 -AcceptCandidate <完整候選SHA> -AcceptanceNote '<使用者接受範圍>' -RunId <唯一名稱>
-~~~
+只有使用者另行明確接受後，在乾淨、已審查且 HEAD 等於指定完整 SHA 的候選執行：
 
-以 compare-and-swap 前進 codex/btr-accepted，保留 evidence/source-acceptance 收據；不變更建議版本、穩定分支或裝置。
-ref 已 checkout、歷史缺前一接受來源、未提交、或 SHA 不等於 HEAD 時停止。
-日後直接要求「同步 PiliPlus 最新版本並保留 BTR 功能」，並使用本工具所在候選路徑。
-本機安全回歸：pwsh -NoProfile -File .\tool\btr_sync_tests.ps1（只用 disposable Git fixtures）。
-保留原始 evidence、候選、分支與 APK；不 push、不建 PR、不發布、不自動裝機。
-歷史同步報告為 BTR_UPSTREAM_RESULT_20261016.md；驗收缺口見 BTR_DEVELOPMENT_INDEX.md。
+```powershell
+pwsh -NoProfile -File tools/btr_sync_upstream.ps1 -AcceptCandidate <完整候選SHA> -AcceptanceNote '<使用者接受範圍>' -RunId <唯一名稱>
+```
+
+以 compare-and-swap 前進 `codex/btr-accepted` 並保存 `evidence/source-acceptance` 收據。ref 已 checkout、缺前一接受來源、未提交或 SHA 不等於 HEAD 即停止。AcceptCandidate 不提升 stable、不改版本清單、不表示 Android 驗收。保留歷史工作樹、分支、tags、APK 與 evidence；不 push、不建 PR、不發布、不自動裝機。

@@ -1,0 +1,35 @@
+diff --git a/android/app/src/main/kotlin/com/example/piliplus/MainActivity.kt b/android/app/src/main/kotlin/com/example/piliplus/MainActivity.kt
+index 170ed81c4ab0f3f82694abc9dc72a57e7d26b520..4b70730c613729f257edb7096bc63b5d87ee235f 100644
+--- a/android/app/src/main/kotlin/com/example/piliplus/MainActivity.kt
++++ b/android/app/src/main/kotlin/com/example/piliplus/MainActivity.kt
+@@ -1,12 +1,28 @@
+ package com.example.piliplus
+ 
++import android.content.Context
+ import android.content.res.Configuration
+ import android.os.Build
+ import android.os.Bundle
+ import android.view.WindowManager.LayoutParams
+-import com.ryanheise.audioservice.AudioServiceActivity
++import com.ryanheise.audioservice.AudioServicePlugin
++import io.flutter.embedding.android.FlutterActivity
++import io.flutter.embedding.engine.FlutterEngine
++
++class MainActivity : FlutterActivity() {
++    override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
++        super.configureFlutterEngine(flutterEngine)
++        if (!flutterEngine.plugins.has(BtrDiagnosticsExport::class.java)) {
++            flutterEngine.plugins.add(BtrDiagnosticsExport())
++        }
++    }
++
++    // Retain the audio_service engine without AudioServiceActivity's unconditional
++    // stop() in onDestroy(). The real onTaskRemoved callback must finish Dart/mpv
++    // cleanup before the handler publishes idle and lets the service stop.
++    override fun provideFlutterEngine(context: Context): FlutterEngine =
++        AudioServicePlugin.getFlutterEngine(context)
+ 
+-class MainActivity : AudioServiceActivity() {
+     override fun onConfigurationChanged(newConfig: Configuration) {
+         super.onConfigurationChanged(newConfig)
+         if (AndroidHelper.isFoldable) {

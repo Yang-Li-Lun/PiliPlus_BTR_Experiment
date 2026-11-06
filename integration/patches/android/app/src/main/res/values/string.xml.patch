@@ -1,0 +1,13 @@
+diff --git a/android/app/src/main/res/values/string.xml b/android/app/src/main/res/values/string.xml
+index cf338c23037a237a15429b68761882610b424c3c..5fd83452cefaed5334af33bc0dcf12c6cd6d454a 100644
+--- a/android/app/src/main/res/values/string.xml
++++ b/android/app/src/main/res/values/string.xml
+@@ -1,5 +1,5 @@
+ <resources>
+-    <string name="app_name">PiliPlus</string>
++    <string name="app_name">PiliPlus BTR</string>
+     <string name="search">搜索</string>
+     <string name="offline_video">离线视频</string>
+-</resources>
+\ No newline at end of file
++</resources>

@@ -2,6 +2,10 @@
 
 更新日期：2026-11-06（Asia/Taipei）。使用者已確認 **PiliPlus-BTR-Upstream-20261027-01 可以使用，並明確指定為目前最新穩定使用版**。完整效能、長時間播放及原生資源驗收仍未完成；本機接受不等於正式發布。
 
+## 分離來源候選
+
+`codex/btr-separated-20261106-01`／repository 根的 `.btr-wt/sep-1106-01` 從模組化來源 `1f0d304a3` 建立，仍為未接受候選。架構與工具入口見 [BTR_SOURCES.md](BTR_SOURCES.md)，逐檔接點見 [CONTACTS](integration/CONTACTS.md)。它沒有替代下列已接受／穩定來源。
+
 ## 目前最新穩定使用版
 
 | 項目 | 固定值 |
@@ -16,7 +20,7 @@
 | 套件／ABI | `com.example.piliplus.btr.experiment.dev`／ARM64 |
 | APK 大小／SHA-256 | 24,799,322 bytes／`4b70a98ea4dd6ab8a4cc17b3586cec855796029188fb9b64bf6f554811b05a5d` |
 
-[目前穩定 APK](build/btr-candidates/upstream-20261027-01/PiliPlus-BTR-Upstream-20261027-01-dev-arm64-v8a.apk)、[版本清單](tool/btr_current_recommendation.json)、[接受紀錄](BTR_STABLE_ACCEPTANCE_20261106.md)、[開發日誌](DEVLOG.md)、[後續同步](BTR_UPSTREAM.md)。維護提交不是原 APK 的建置 Commit；需要重建時使用固定建置來源、原 Build ID 與既有 DEV 簽章，核對 lock、SDK、patches 並另存新產物，不覆寫封存 APK。
+[目前穩定 APK](../../.btr-wt/up-1027-01/build/btr-candidates/upstream-20261027-01/PiliPlus-BTR-Upstream-20261027-01-dev-arm64-v8a.apk)、[版本清單](tools/legacy/btr_current_recommendation.json)、[接受紀錄](BTR_STABLE_ACCEPTANCE_20261106.md)、[開發日誌](DEVLOG.md)、[後續同步](BTR_UPSTREAM.md)。維護提交不是原 APK 的建置 Commit；需要重建時使用固定建置來源、原 Build ID 與既有 DEV 簽章，核對 lock、SDK、patches 並另存新產物，不覆寫封存 APK。
 
 ## 目前驗收界線
 
@@ -41,7 +45,7 @@
 
 [歷史 55fd APK](../../.btr-wt/sp-1026-01/build/btr-candidates/http-stop-diag-20261027-01/PiliPlus-BTR-HttpStopDiag-20261027-01-dev-arm64-v8a.apk) 是既有封存檔案，不另複製大型 APK。此版本已由上方新版取代，不再是目前推薦安裝來源。
 
-機器可讀的 APK 路徑、雜湊、來源與候選狀態：[tool/btr_current_recommendation.json](tool/btr_current_recommendation.json)。`evidence/`、`.btr-wt/`、`build/` 等本機資料不在一般 Git 追蹤內；只有 Git 提交不能恢復 APK 與原始量測，保留這些目錄才保有可重播證據。
+機器可讀的 APK 路徑、雜湊、來源與候選狀態：[tools/legacy/btr_current_recommendation.json](tools/legacy/btr_current_recommendation.json)。`evidence/`、`.btr-wt/`、`build/` 等本機資料不在一般 Git 追蹤內；只有 Git 提交不能恢復 APK 與原始量測，保留這些目錄才保有可重播證據。
 
 ## 歷史 55fd 已驗證範圍與剩餘問題
 
