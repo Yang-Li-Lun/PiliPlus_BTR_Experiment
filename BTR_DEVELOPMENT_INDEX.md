@@ -2,7 +2,11 @@
 
 更新日期：2026-11-06（Asia/Taipei）。使用者已確認 **PiliPlus-BTR-Upstream-20261027-01 可以使用，並明確指定為目前最新穩定使用版**。完整效能、長時間播放及原生資源驗收仍未完成；本機接受不等於正式發布。
 
-## 分離來源候選
+## 分離來源上游同步候選
+
+`codex/btr-update-up-1106-03`／repository 根的 `.btr-wt/up-1106-03` 由原分離來源 `fdfdd4b2c` 建立，將官方來源同步至 `d0e03529b6938aeb9aa290fcf6ba58d4e93a537a`（PiliPlus 2.2.0+1）。實作及 APK 建置來源為 `0e5e30bc1f7e66c5dc552aaf2a78cebb9c83ff21`；BTR 自有來源與 overlay 未變，官方 tree 完全一致。離線回歸、靜態分析及 ARM64 DEV APK 完成，完整 AudioService/native 仍因 MSVC 缺少而 BLOCKED；候選未接受、沒有裝置驗證。見 [同步驗證報告](BTR_UPSTREAM_SEPARATED_RESULT_20261106.md)。
+
+## 原分離來源候選
 
 `codex/btr-separated-20261106-01`／repository 根的 `.btr-wt/sep-1106-01` 從模組化來源 `1f0d304a3` 建立，仍為未接受候選。架構與工具入口見 [BTR_SOURCES.md](BTR_SOURCES.md)，逐檔接點見 [CONTACTS](integration/CONTACTS.md)，驗證與 APK 見 [分離來源交付報告](BTR_SEPARATED_RESULT_20261106.md)。它沒有替代下列已接受／穩定來源。
 
