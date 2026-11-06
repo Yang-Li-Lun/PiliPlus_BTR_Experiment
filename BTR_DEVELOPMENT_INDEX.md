@@ -4,7 +4,7 @@
 
 ## 分離來源候選
 
-`codex/btr-separated-20261106-01`／repository 根的 `.btr-wt/sep-1106-01` 從模組化來源 `1f0d304a3` 建立，仍為未接受候選。架構與工具入口見 [BTR_SOURCES.md](BTR_SOURCES.md)，逐檔接點見 [CONTACTS](integration/CONTACTS.md)。它沒有替代下列已接受／穩定來源。
+`codex/btr-separated-20261106-01`／repository 根的 `.btr-wt/sep-1106-01` 從模組化來源 `1f0d304a3` 建立，仍為未接受候選。架構與工具入口見 [BTR_SOURCES.md](BTR_SOURCES.md)，逐檔接點見 [CONTACTS](integration/CONTACTS.md)，驗證與 APK 見 [分離來源交付報告](BTR_SEPARATED_RESULT_20261106.md)。它沒有替代下列已接受／穩定來源。
 
 ## 目前最新穩定使用版
 

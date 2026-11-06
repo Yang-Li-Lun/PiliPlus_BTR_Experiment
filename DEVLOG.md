@@ -37,3 +37,11 @@
 - 建置 `modular-20261106-01` ARM64 DEV APK，套件及既有簽章一致。SHA-256 `ad50e0e6c20c6c29479f49bb737719fdc90ba4fe1ae12e3176d64d364362715d`，24,796,590 bytes。初次 Gradle loopback 錯誤後依規則以候選短 IPC 路徑建置成功。
 - 完整交付、失敗／阻擋及證據界線見 `BTR_MODULAR_RESULT_20261106.md`；APK 位於候選 `build/btr-candidates/modular-20261106-01/`，原始日誌位於候選 `evidence/modular-20261106-01/`。
 - 未安裝或操作裝置；原 stable／accepted refs、版本清單、歷史 APK／evidence／工作樹保留。原生資源、長時播放、完整效能及實機 UI／SAF 驗收仍未完成。
+
+## 2026-11-06｜BTR 實體來源分離候選
+
+- 從模組化來源 `1f0d304a3` 建立 `codex/btr-separated-20261106-01`／`.btr-wt/sep-1106-01`。實作及 APK 來源 `ff19eabea607719b423eabee359f980731cb000a`；狀態為未接受候選。
+- 官方 PiliPlus tree 與 `d680e3f9` 完全相同；55 個 BTR 自有來源、8 個 adapter、16 個官方 patch 與整合工具分區管理。重組後 1,525 個 app／測試／lock inputs 與模組化基準 blob 完全一致。
+- 核心 169、設定／診斷 13、Kotlin 9、既有同步 19 assertions 通過；新增組合 11 案例及分離同步 3 場景／重複同步取得通過。分析 0 errors／0 warnings、40 info；完整 Flutter/native 因缺 MSVC 在案例前阻擋。
+- ARM64 DEV APK 24,796,198 bytes，SHA-256 `0c7a7cb2b30ca3ec9733cfcead71d3b2fab984a7d44f7e479c7d3ca69905c686`；DEV package／既有 certificate 已核對。Gradle IPC 症狀後依規則使用候選短路徑建置成功。
+- accepted／stable／模組化 refs、根 owner 內容與歷史成果保留，未同步官方新版、未接受候選或操作裝置。完整結果與限制見 [分離來源交付報告](BTR_SEPARATED_RESULT_20261106.md)，原始證據於 `evidence/separated-20261106-01/`。
