@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "upstreamCommit": "d680e3f95cf777ff20492dd2a23c89264481dca0",
+  "upstreamCommit": "d0e03529b6938aeb9aa290fcf6ba58d4e93a537a",
   "behaviorBaseline": "1f0d304a3e161e35980565b1088dc79c0717b424",
   "apkCodeBaseline": "d30b2e0d3e6694fe13fece12f30034a257454848",
   "upstreamUrl": "https://github.com/bggRGjQaUbCoE/PiliPlus.git",
@@ -292,7 +292,7 @@
     {
       "target": "lib/pages/audio/controller.dart",
       "source": "integration/patches/lib/pages/audio/controller.dart.patch",
-      "baseBlob": "4878d7edc359e63f943d4f7d9c793f99664af0cb"
+      "baseBlob": "eff85e272895e274c8763a1b758810994596de17"
     },
     {
       "target": "lib/pages/setting/models/play_settings.dart",
@@ -302,7 +302,7 @@
     {
       "target": "lib/pages/video/controller.dart",
       "source": "integration/patches/lib/pages/video/controller.dart.patch",
-      "baseBlob": "b76dbadeccfab26d1f4b257c9adf11d359ff15e9"
+      "baseBlob": "e8d4508a634312e243b502a55d5d375657efd677"
     },
     {
       "target": "lib/pages/video/widgets/header_control.dart",
@@ -312,7 +312,7 @@
     {
       "target": "lib/plugin/pl_player/controller.dart",
       "source": "integration/patches/lib/plugin/pl_player/controller.dart.patch",
-      "baseBlob": "fb98ecf3d2c6eb59326102e133ca8c8b6df5bfa6"
+      "baseBlob": "aa70701ba6facf64c8099e49e14adc01972db976"
     },
     {
       "target": "lib/plugin/pl_player/models/data_source.dart",
@@ -322,22 +322,22 @@
     {
       "target": "lib/plugin/pl_player/view/view.dart",
       "source": "integration/patches/lib/plugin/pl_player/view/view.dart.patch",
-      "baseBlob": "e44e288a67eadbbc94baa8b1a86adb1813dcadb1"
+      "baseBlob": "8bd7fdc3617813f438b49ee1f98192193f51d354"
     },
     {
       "target": "lib/services/audio_handler.dart",
       "source": "integration/patches/lib/services/audio_handler.dart.patch",
-      "baseBlob": "283693853e593b8645cf182241ad57966e669026"
+      "baseBlob": "6df79f343db0b1b79ba2132697d02f88f3fdda92"
     },
     {
       "target": "pubspec.lock",
       "source": "integration/patches/pubspec.lock.patch",
-      "baseBlob": "2e0592fef7620b73cff97eecd19947602bb37c07"
+      "baseBlob": "023328c70255bb33b962e8b026a0d1e1068290f2"
     },
     {
       "target": "pubspec.yaml",
       "source": "integration/patches/pubspec.yaml.patch",
-      "baseBlob": "35c3a38e33cf7b4d7bf98c8e34d551016377e42b"
+      "baseBlob": "bca7a29c548a76fd7bce0e3c6ed2321fa05b50a2"
     }
   ],
   "tools": [

@@ -23,7 +23,7 @@ pwsh -NoProfile -File tools/btr_sync_upstream.ps1 -SourceRef codex/btr-separated
 
 ## 官方樹與 Integration 更新
 
-只 fetch 官方 main，不 fetch tags、不 prune、不 force。純上游鏡像僅 fast-forward；保留 `btr-pre-sync-<RunId>` 及 `evidence/upstream-sync/<RunId>/sync.json`。本次分離工程沒有執行實際官方同步。
+只 fetch 官方 main，不 fetch tags、不 prune、不 force。純上游鏡像僅 fast-forward；保留 `btr-pre-sync-<RunId>` 及呼叫工作樹的 `evidence/upstream-sync/<RunId>/sync.json`。目前候選的官方 pin 為 `d0e03529b6938aeb9aa290fcf6ba58d4e93a537a`（2.2.0+1）。
 
 來源為原 layout 時沿用既有 merge。來源含 `integration/sources.json` 時，以 Git subtree merge 把官方根樹映射到 `PiliPlus/`，保留官方與 BTR 祖先。衝突保留 index／MERGE_HEAD，讀 base/ours/theirs 後精確 stage，不整檔選 ours/theirs、不自動 abort。
 
@@ -35,7 +35,7 @@ pwsh -NoProfile -File tools/btr_sync_upstream.ps1 -SourceRef codex/btr-separated
 
 ## 驗證與交付
 
-分離架構使用 `tools/btr.ps1` 的 Compose／Setup／Core／Settings／Analyze／Native／VerifiedWrite／Build。完整命令與 inputs 核對見 [BTR_SOURCES.md](BTR_SOURCES.md)。來源回歸：`python tools/test_sources.py`；既有同步安全：`pwsh -File tools/btr_sync_tests.ps1`；分離同步：`python tools/test_separated_sync.py`。同步測試只使用本機 disposable Git fixtures。
+分離架構使用 `tools/btr.ps1` 的 Compose／Setup／Core／Settings／Analyze／Native／VerifiedWrite／Build。完整命令與 inputs 核對見 [BTR_SOURCES.md](BTR_SOURCES.md)。來源回歸：`python tools/test_sources.py`；既有同步安全：`pwsh -File tools/btr_sync_tests.ps1`；分離同步：`python tools/test_separated_sync.py`。同步測試只使用本機 disposable Git fixtures。`python tools/test_upstream_lifecycle.py` 擷取組合後的實際音訊方法，驗證非同步完成後的 owner／task 保護及通知動作；它使用原生 mock，不能代替完整 Flutter/native 或裝置驗證。
 
 舊 `btr_verify_features.ps1` tripwire 保留在 `tools/legacy/`，只適用原 layout 的 Git checkout；分離來源改以 pin／manifest／逐檔 blob 與組合驗證，不能在生成目錄誤用外層 Git root。位元組／結構驗證與 APK 成功不是實機驗收。
 

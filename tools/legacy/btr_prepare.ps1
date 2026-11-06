@@ -43,15 +43,18 @@ if (!$package) { throw 'Run flutter pub get --enforce-lockfile with local PUB_CA
 $material = Get-Item -LiteralPath ([Uri]::new([Uri]::new($configFile), $package.rootUri).LocalPath)
 if (!$material.FullName.StartsWith($cache + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase) -or
     ($material.Attributes -band [IO.FileAttributes]::ReparsePoint)) { throw 'material_ui must be in independent candidate cache' }
-$relative = [IO.Path]::GetRelativePath($repo, $material.FullName).Replace('\','/')
+# The assembled app is nested inside the owning Git worktree. Pin the working
+# directory explicitly so git apply cannot skip every path as outside its prefix.
+# No index/ref operation is performed against the private SDK's Git metadata.
+$materialGit = @('-C', $material.FullName, "--git-dir=$sdk/.git", "--work-tree=$($material.FullName)")
 foreach ($name in @('modal_barrier_material','navigation_drawer','popup_menu','fab',
  'text_field','scaffold','refresh_indicator','tabs','bottom_sheet_android')) {
   $patch = Join-Path $repo "lib/scripts/material/$name.patch"
-  & git -C $repo apply "--directory=$relative" --reverse --check $patch 2>$null
+  & git @materialGit apply --reverse --check $patch 2>$null
   if ($LASTEXITCODE -eq 0) { continue }
-  & git -C $repo apply "--directory=$relative" --check $patch
+  & git @materialGit apply --check $patch
   if ($LASTEXITCODE -ne 0) { throw "Material patch check failed: $name" }
-  & git -C $repo apply "--directory=$relative" $patch
+  & git @materialGit apply $patch
   if ($LASTEXITCODE -ne 0) { throw "Material patch failed: $name" }
   Write-Output "Applied material_ui: $name"
 }

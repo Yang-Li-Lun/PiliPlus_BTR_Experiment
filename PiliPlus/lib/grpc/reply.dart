@@ -110,7 +110,7 @@ abstract final class ReplyGrpc {
     Int64? rpid,
     required Mode mode,
     required String? offset,
-    required Int64? cursorNext,
+    // Int64? cursorNext,
   }) async {
     final res = await GrpcReq.request(
       GrpcUrl.mainList,
@@ -129,8 +129,13 @@ abstract final class ReplyGrpc {
     );
     if (res case Success(:final response)) {
       // keyword filter
-      if (response.hasUpTop() && needRemoveGrpc(response.upTop)) {
-        response.clearUpTop();
+      if (response.hasUpTop()) {
+        final topReply = response.upTop;
+        if (needRemoveGrpc(topReply)) {
+          response.clearUpTop();
+        } else {
+          topReply.replies.removeWhere(needRemoveGrpc);
+        }
       }
 
       if (response.replies.isNotEmpty) {

@@ -1,8 +1,8 @@
 diff --git a/lib/pages/audio/controller.dart b/lib/pages/audio/controller.dart
-index 4878d7edc359e63f943d4f7d9c793f99664af0cb..78c75a0b40afb710eecf5353a3f4825f095ae0eb 100644
+index eff85e272895e274c8763a1b758810994596de17..39cacd713785f9d251d59e8daeb8782f920b2fde 100644
 --- a/lib/pages/audio/controller.dart
 +++ b/lib/pages/audio/controller.dart
-@@ -30,6 +30,8 @@ import 'package:PiliPlus/plugin/pl_player/controller.dart';
+@@ -30,6 +30,8 @@
  import 'package:PiliPlus/plugin/pl_player/models/play_repeat.dart';
  import 'package:PiliPlus/plugin/pl_player/models/play_status.dart';
  import 'package:PiliPlus/services/service_locator.dart';
@@ -11,7 +11,7 @@ index 4878d7edc359e63f943d4f7d9c793f99664af0cb..78c75a0b40afb710eecf5353a3f4825f
  import 'package:PiliPlus/services/shutdown_timer_service.dart';
  import 'package:PiliPlus/utils/accounts.dart';
  import 'package:PiliPlus/utils/android/android_helper.dart';
-@@ -72,6 +74,7 @@ class AudioController extends GetxController
+@@ -72,6 +74,7 @@
    final audioItem = Rxn<DetailItem>();
  
    bool _hasInit = false;
@@ -19,7 +19,7 @@ index 4878d7edc359e63f943d4f7d9c793f99664af0cb..78c75a0b40afb710eecf5353a3f4825f
    @override
    Player? player;
    late int cacheAudioQa;
-@@ -156,6 +159,7 @@ class AudioController extends GetxController
+@@ -156,6 +159,7 @@
  
    @override
    void onInit() {
@@ -27,7 +27,30 @@ index 4878d7edc359e63f943d4f7d9c793f99664af0cb..78c75a0b40afb710eecf5353a3f4825f
      super.onInit();
      final args = Get.arguments;
      oid = Int64(args['oid']);
-@@ -360,7 +364,11 @@ class AudioController extends GetxController
+@@ -219,14 +223,18 @@
+   }
+ 
+   Future<void>? onPlay() async {
+-    if (player == null) return;
+-    await player?.play();
++    final currentPlayer = player;
++    if (_taskScope.closed || currentPlayer == null) return;
++    await currentPlayer.play();
++    if (_taskScope.closed || !identical(player, currentPlayer)) return;
+     await audioSessionHandler?.setActive(true);
+   }
+ 
+   Future<void>? onPause() async {
+-    if (player == null) return;
+-    await player?.pause();
++    final currentPlayer = player;
++    if (_taskScope.closed || currentPlayer == null) return;
++    await currentPlayer.pause();
++    if (_taskScope.closed || !identical(player, currentPlayer)) return;
+     await audioSessionHandler?.setActive(false);
+   }
+ 
+@@ -374,22 +382,28 @@
      String? referer,
      http_model.Volume? volume,
    }) async {
@@ -35,11 +58,23 @@ index 4878d7edc359e63f943d4f7d9c793f99664af0cb..78c75a0b40afb710eecf5353a3f4825f
 +    await videoPlayerServiceHandler?.beginPlayback();
 +    if (_taskScope.closed) return;
      await _initPlayerIfNeeded();
-+    if (_taskScope.closed) return;
-     final extras = audioFilterExtras(volume);
-     player
-       ?..setMediaHeader(
-@@ -374,6 +382,7 @@ class AudioController extends GetxController
+-    if (player == null) return;
+-    player!.setMediaHeader(
++    final currentPlayer = player;
++    if (_taskScope.closed || currentPlayer == null) return;
++    currentPlayer.setMediaHeader(
+       userAgent: ua,
+       // mpv cannot clear referer option
+       headers: {'Referer': ?referer},
+     );
+-    await player!.open(
++    await currentPlayer.open(
+       Media(url, start: _start, extras: audioFilterExtras(volume)),
+     );
++    if (_taskScope.closed || !identical(player, currentPlayer)) return;
+     await onPlay();
+     _start = null;
+   }
  
    PlayerStatus _playerStatus = .paused;
    void _updatePlaybackState({Duration? position, String? debugLabel}) {
@@ -47,7 +82,7 @@ index 4878d7edc359e63f943d4f7d9c793f99664af0cb..78c75a0b40afb710eecf5353a3f4825f
      videoPlayerServiceHandler?.onUpdateState(
        _playerStatus,
        false,
-@@ -385,25 +394,32 @@ class AudioController extends GetxController
+@@ -401,20 +415,27 @@
    }
  
    Future<void> _initPlayerIfNeeded() async {
@@ -59,9 +94,6 @@ index 4878d7edc359e63f943d4f7d9c793f99664af0cb..78c75a0b40afb710eecf5353a3f4825f
 -      configuration: PlayerConfiguration(
 -        options: {
 -          if (Platform.isAndroid) 'ao': Pref.audioOutput,
--          'volume': PlatformUtils.isDesktop
--              ? (desktopVolume.value * 100).toString()
--              : Pref.playerVolume.toString(),
 -          ...Pref.initBuffer(),
 -        },
 +    player = await _taskScope.acquire(
@@ -69,31 +101,35 @@ index 4878d7edc359e63f943d4f7d9c793f99664af0cb..78c75a0b40afb710eecf5353a3f4825f
 +        configuration: PlayerConfiguration(
 +          options: {
 +            if (Platform.isAndroid) 'ao': Pref.audioOutput,
-+            'volume': PlatformUtils.isDesktop
-+                ? (desktopVolume.value * 100).toString()
-+                : Pref.playerVolume.toString(),
 +            ...Pref.initBuffer(),
 +          },
 +        ),
        ),
+-    );
 +      disposePlaybackPlayer,
-     );
--    if (isClosed) {
--      player!.dispose();
++    );
 +    if (_taskScope.closed) {
-       player = null;
-       return;
-     }
-+    if (player == null) return;
-+    if (isClosed) {
-+      await _taskScope.close();
++      player = null;
 +      return;
 +    }
++    if (player == null) return;
+     if (isClosed) {
+-      player!.dispose();
+-      player = null;
++      await _taskScope.close();
+       return;
+     }
+     // >100% 的音量走 af 增益+限幅，避免直接放大 mpv volume 导致削波
+@@ -422,6 +443,7 @@
+       player,
+       PlatformUtils.isDesktop ? desktopVolume.value : Pref.playerVolume / 100,
+     );
++    if (_taskScope.closed || player == null) return;
      final stream = player!.stream;
      _subscriptions = [
        stream.position.listen((position) {
-@@ -831,13 +847,22 @@ class AudioController extends GetxController
-       ..onSkipToPrevious = null
+@@ -846,13 +868,22 @@
+       ..isPlaying = null
        ..onVideoDetailDispose(hashCode.toString())
        ..clearIfNeeded();
 -    _subscriptions?.forEach((e) => e.cancel());

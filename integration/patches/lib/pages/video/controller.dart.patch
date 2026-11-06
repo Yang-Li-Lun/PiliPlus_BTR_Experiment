@@ -1,8 +1,8 @@
 diff --git a/lib/pages/video/controller.dart b/lib/pages/video/controller.dart
-index b76dbadeccfab26d1f4b257c9adf11d359ff15e9..53b1649ed4d566e80db55107e01a7f5bdd1c1fed 100644
+index e8d4508a634312e243b502a55d5d375657efd677..5bf6dccb8359e8aff7c593014688bb3ec9895561 100644
 --- a/lib/pages/video/controller.dart
 +++ b/lib/pages/video/controller.dart
-@@ -3,6 +3,7 @@ import 'dart:io' show Platform;
+@@ -3,6 +3,7 @@
  import 'dart:math' show min;
  import 'dart:ui';
  
@@ -10,7 +10,7 @@ index b76dbadeccfab26d1f4b257c9adf11d359ff15e9..53b1649ed4d566e80db55107e01a7f5b
  import 'package:PiliPlus/common/style.dart';
  import 'package:PiliPlus/common/widgets/pair.dart';
  import 'package:PiliPlus/common/widgets/progress_bar/segment_progress_bar.dart';
-@@ -135,6 +136,11 @@ class VideoDetailController extends GetxController
+@@ -135,6 +136,11 @@
    late VideoItem firstVideo;
    String? videoUrl;
    String? audioUrl;
@@ -22,7 +22,7 @@ index b76dbadeccfab26d1f4b257c9adf11d359ff15e9..53b1649ed4d566e80db55107e01a7f5b
    Duration? defaultST;
    Duration? playedTime;
    String playedTimePos(bool hasParams) {
-@@ -709,7 +715,7 @@ class VideoDetailController extends GetxController
+@@ -702,7 +708,7 @@
        ..buffered.value = 0;
  
      firstVideo = findVideoByQa(currentVideoQa.code, setCodecs: true);
@@ -31,7 +31,7 @@ index b76dbadeccfab26d1f4b257c9adf11d359ff15e9..53b1649ed4d566e80db55107e01a7f5b
  
      /// 根据currentAudioQa 重新设置audioUrl
      if (currentAudioQa != null) {
-@@ -717,7 +723,7 @@ class VideoDetailController extends GetxController
+@@ -710,7 +716,7 @@
          (i) => i.id == currentAudioQa!.code,
          orElse: () => data.dash!.audio!.first,
        );
@@ -40,7 +40,7 @@ index b76dbadeccfab26d1f4b257c9adf11d359ff15e9..53b1649ed4d566e80db55107e01a7f5b
      }
  
      playerInit();
-@@ -754,6 +760,10 @@ class VideoDetailController extends GetxController
+@@ -747,6 +753,10 @@
            : NetworkSource(
                videoSource: videoUrl!,
                audioSource: audioUrl,
@@ -51,7 +51,7 @@ index b76dbadeccfab26d1f4b257c9adf11d359ff15e9..53b1649ed4d566e80db55107e01a7f5b
              ),
        seekTo: seek,
        duration: data.timeLength == null
-@@ -971,7 +981,8 @@ class VideoDetailController extends GetxController
+@@ -964,7 +974,8 @@
        currentDecodeFormats = targetDecode;
        currentVideoQa.value = VideoQuality.fromCode(targetQuality);
        _setVideoHeight();
@@ -61,7 +61,7 @@ index b76dbadeccfab26d1f4b257c9adf11d359ff15e9..53b1649ed4d566e80db55107e01a7f5b
  
        AudioItem? firstAudio;
        final audioList = dash.audio;
-@@ -980,7 +991,7 @@ class VideoDetailController extends GetxController
+@@ -973,7 +984,7 @@
            audioList,
            plPlayerController.cacheAudioQa,
          );
@@ -70,7 +70,7 @@ index b76dbadeccfab26d1f4b257c9adf11d359ff15e9..53b1649ed4d566e80db55107e01a7f5b
          currentAudioQa = AudioQuality.fromCode(firstAudio.id);
        } else {
          audioUrl = '';
-@@ -1556,6 +1567,7 @@ class VideoDetailController extends GetxController
+@@ -1548,6 +1559,7 @@
                Get.back();
                this.videoUrl = videoUrl;
                this.audioUrl = audioUrl;

@@ -2,11 +2,11 @@
 
 ## 有效來源
 
-本候選將同一 Git repository 內的來源分成四個實體目錄，不新增 Dart package、外部 repository 或 submodule。分離來源由 `integration/sources.json` 列舉並鎖定；目前官方基準為 `d680e3f95cf777ff20492dd2a23c89264481dca0`，行為比對來源為模組化候選 `1f0d304a3e161e35980565b1088dc79c0717b424`，既有 APK 的程式碼來源為 `d30b2e0d3e6694fe13fece12f30034a257454848`。
+本候選將同一 Git repository 內的來源分成四個實體目錄，不新增 Dart package、外部 repository 或 submodule。分離來源由 `integration/sources.json` 列舉並鎖定；目前官方基準為 `d0e03529b6938aeb9aa290fcf6ba58d4e93a537a`（PiliPlus 2.2.0+1，Flutter 3.47.9）。manifest 的 `behaviorBaseline` 與 `apkCodeBaseline` 保留來源分離時的歷史比對識別，不表示新版與舊應用程式等價。
 
 | 目錄 | 所有權與編輯規則 |
 | --- | --- |
-| `PiliPlus/` | 1,651 個純官方 Git blobs，含官方 pubspec、lock、Flutter patches、Android、其他平臺與 notices。檔案集合與內容必須精確符合官方 pin；不在這裡加入 BTR。官方 README 位於此目錄。 |
+| `PiliPlus/` | 1,665 個純官方 Git blobs，含官方 pubspec、lock、Flutter patches、Android、其他平臺與 notices。檔案集合與內容必須精確符合官方 pin；不在這裡加入 BTR。官方 README 位於此目錄。 |
 | `BTR/` | 55 個自有新增檔：傳輸／CDN／播放模組、設定模型與 UI、監控診斷、Android 輔助實作、回歸測試及 MIT notice。內部相對路徑就是重組後路徑。 |
 | `integration/overlay/` | 8 個自有適配檔：播放器私有 part、DASH 擷取、Hive binding、來源／Seek／task scope／dispose 接點與 Android loopback network security。 |
 | `integration/patches/` | 16 個逐檔 patch，僅修改必要的官方接點；每份 patch 有固定目標與 base blob。不得用完整修改後官方檔取代 patch。 |
@@ -24,12 +24,12 @@
 
 ```powershell
 python tools/btr_sources.py compose
-python tools/btr_sources.py verify --baseline
+python tools/btr_sources.py verify
 # 修改來源後，以新目錄重組；後續各命令帶同一個 -Output。
 pwsh -NoProfile -File tools/btr.ps1 -Task Compose -Output .assembled/review-02
 ```
 
-`--baseline` 額外驗證 `lib/`、`android/`、`test/`、第三方 notice、pubspec、lock 與 `.fvmrc` 等 1,525 個檔案，與模組化來源的 Git blobs 完全一致。這是本次分離工程的行為保留證據；未來修改功能／官方版本後，不能仍宣稱符合舊行為基準。一般 `verify` 檢查當前分離來源與輸出的一致性。
+`--baseline` 僅供檢查原分離版本與歷史模組化來源的 Git blobs 是否一致；更新官方版本後不適用。一般 `verify` 檢查當前官方 pin、分離來源與輸出的一致性。
 
 ## 工具鏈、驗證及建置
 
@@ -45,6 +45,7 @@ pwsh -NoProfile -File tools/btr.ps1 -Task VerifiedWrite -JavaHome '<JDK>'
 python tools/test_sources.py
 pwsh -NoProfile -File tools/btr_sync_tests.ps1
 python tools/test_separated_sync.py
+python tools/test_upstream_lifecycle.py
 # 候選須先提交且乾淨；唯一 BuildId 保護歷史 APK。
 pwsh -NoProfile -File tools/btr.ps1 -Task Build -BuildId '<唯一 ID>' -AndroidSdk '<SDK>' -JavaHome '<JDK>'
 ```
@@ -57,7 +58,7 @@ Build 沿用既有 `BTR_DEVICE_TEST=true` 診斷編譯旗標與 ARM64 DEV 建置
 
 ## 耦合範圍
 
-官方 1,651 個檔案現在不含 BTR 修改；自有新增檔案有唯一維護位置，16 個官方修改以可審查 patch 保存。更新上游時，純官方樹與 BTR 模組可以各自比較，工具負責重新組合，無須人工複製完整播放器或 Android 檔案。
+官方 1,665 個檔案不含 BTR 修改；自有新增檔案有唯一維護位置，16 個官方修改以可審查 patch 保存。更新上游時，純官方樹與 BTR 模組可以各自比較，工具負責重新組合，無須人工複製完整播放器或 Android 檔案。
 
 執行期耦合沒有被宣稱消失：`player_integration.dart` 仍屬於 `PlPlayerController` library，依賴其私有欄位／來源序號／Seek 意圖／generation；DASH 依賴選定 representation 與上游 selector 的順序；設定 binding 依賴 GStorage；監控／設定 UI 依賴 PiliPlus 路由與播放器；MainActivity 依賴 AudioService engine，manifest／Gradle 依賴 DEV 身分與 loopback 契約。完整逐檔清單見 [CONTACTS](integration/CONTACTS.md)。
 

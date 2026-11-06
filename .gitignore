@@ -165,3 +165,4 @@ evidence/
 __pycache__/
 !/tools/test_sources.py
 !/tools/test_separated_sync.py
+!/tools/test_upstream_lifecycle.py

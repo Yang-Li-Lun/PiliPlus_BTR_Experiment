@@ -1,27 +1,27 @@
 diff --git a/lib/services/audio_handler.dart b/lib/services/audio_handler.dart
-index 283693853e593b8645cf182241ad57966e669026..4c1777121d03c06b27b34c29b653d34e4ed2cabd 100644
+index 6df79f343db0b1b79ba2132697d02f88f3fdda92..991e99a4d79853b42c7e82cae11854e3e57a0cf0 100644
 --- a/lib/services/audio_handler.dart
 +++ b/lib/services/audio_handler.dart
-@@ -14,6 +14,8 @@ import 'package:PiliPlus/pages/video/introduction/pgc/controller.dart';
+@@ -15,6 +15,8 @@
  import 'package:PiliPlus/pages/video/introduction/ugc/controller.dart';
  import 'package:PiliPlus/plugin/pl_player/controller.dart';
  import 'package:PiliPlus/plugin/pl_player/models/play_status.dart';
 +import 'package:PiliPlus/services/playback_task_scope.dart';
 +import 'package:PiliPlus/services/shutdown_timer_service.dart';
  import 'package:PiliPlus/utils/android/bindings.g.dart';
+ import 'package:PiliPlus/utils/device_utils.dart';
  import 'package:PiliPlus/utils/image_utils.dart';
- import 'package:PiliPlus/utils/path_utils.dart';
-@@ -62,7 +64,8 @@ typedef _StatusConfig = (
+@@ -65,7 +67,8 @@
  );
  
  class VideoPlayerServiceHandler extends BaseAudioHandler with SeekHandler {
 -  VideoPlayerServiceHandler() {
 +  VideoPlayerServiceHandler({bool? enableBackgroundPlay})
 +    : enableBackgroundPlay = enableBackgroundPlay ?? Pref.enableBackgroundPlay {
-     if (Platform.isAndroid) {
-       final jStr = AndroidHelper.manufacturer();
-       if (jStr != null &&
-@@ -79,7 +82,42 @@ class VideoPlayerServiceHandler extends BaseAudioHandler with SeekHandler {
+     // Android 14 dispatches volume keys from the activity straight to the
+     // session without checking canHandleVolumeKey(), so a FIXED remote
+     // session swallows them there. Only verified to fall back on Android 16.
+@@ -85,7 +88,43 @@
    }
  
    static final List<MediaItem> _item = [];
@@ -43,6 +43,7 @@ index 283693853e593b8645cf182241ad57966e669026..4c1777121d03c06b27b34c29b653d34e
 +
 +  Future<void> _stopRemovedTask() async {
 +    _taskRemoved = true;
++    isPlaying = null;
 +    onPlay = null;
 +    onPause = null;
 +    onSeek = null;
@@ -63,9 +64,9 @@ index 283693853e593b8645cf182241ad57966e669026..4c1777121d03c06b27b34c29b653d34e
 +    }
 +  }
  
+   bool Function()? isPlaying;
    Future<void>? Function()? onPlay;
-   Future<void>? Function()? onPause;
-@@ -89,6 +127,7 @@ class VideoPlayerServiceHandler extends BaseAudioHandler with SeekHandler {
+@@ -96,6 +135,7 @@
  
    @override
    Future<void> play() {
@@ -73,7 +74,7 @@ index 283693853e593b8645cf182241ad57966e669026..4c1777121d03c06b27b34c29b653d34e
      return onPlay?.call() ??
          PlPlayerController.playIfExists() ??
          Future.syncValue(null);
-@@ -96,6 +135,7 @@ class VideoPlayerServiceHandler extends BaseAudioHandler with SeekHandler {
+@@ -103,6 +143,7 @@
  
    @override
    Future<void> pause() {
@@ -81,7 +82,7 @@ index 283693853e593b8645cf182241ad57966e669026..4c1777121d03c06b27b34c29b653d34e
      return onPause?.call() ??
          PlPlayerController.pauseIfExists() ??
          Future.syncValue(null);
-@@ -121,25 +161,28 @@ class VideoPlayerServiceHandler extends BaseAudioHandler with SeekHandler {
+@@ -128,18 +169,21 @@
  
    @override
    Future<void> skipToNext() {
@@ -103,6 +104,15 @@ index 283693853e593b8645cf182241ad57966e669026..4c1777121d03c06b27b34c29b653d34e
      return onSeek?.call(position) ??
          PlPlayerController.seekToIfExists(position, isSeek: false) ??
          Future.syncValue(null);
+@@ -147,6 +191,7 @@
+ 
+   @override
+   Future<dynamic> customAction(String name, [Map<String, dynamic>? extras]) {
++    if (_taskRemoved) return Future.syncValue(null);
+     try {
+       switch (name) {
+         case 'ACTION_DM':
+@@ -162,7 +207,7 @@
    }
  
    void setMediaItem(MediaItem newMediaItem) {
@@ -111,7 +121,7 @@ index 283693853e593b8645cf182241ad57966e669026..4c1777121d03c06b27b34c29b653d34e
      // if (kDebugMode) {
      //   debugPrint("此时调用栈为：");
      //   debugPrint(newMediaItem);
-@@ -159,7 +202,7 @@ class VideoPlayerServiceHandler extends BaseAudioHandler with SeekHandler {
+@@ -182,7 +227,7 @@
      required double speed,
      String? debugLabel,
    }) {
@@ -120,7 +130,7 @@ index 283693853e593b8645cf182241ad57966e669026..4c1777121d03c06b27b34c29b653d34e
        return;
      }
  
-@@ -258,7 +301,7 @@ class VideoPlayerServiceHandler extends BaseAudioHandler with SeekHandler {
+@@ -260,7 +305,7 @@
      String? artist,
      String? cover,
    }) {
@@ -129,7 +139,7 @@ index 283693853e593b8645cf182241ad57966e669026..4c1777121d03c06b27b34c29b653d34e
      // if (kDebugMode) {
      //   debugPrint('当前调用栈为：');
      //   debugPrint(StackTrace.current);
-@@ -345,7 +388,7 @@ class VideoPlayerServiceHandler extends BaseAudioHandler with SeekHandler {
+@@ -347,7 +392,7 @@
    }
  
    void onVideoDetailDispose(String herotag) {
@@ -138,7 +148,7 @@ index 283693853e593b8645cf182241ad57966e669026..4c1777121d03c06b27b34c29b653d34e
  
      if (_item.isNotEmpty) {
        _item.removeWhere((item) => item.id.endsWith(herotag));
-@@ -363,8 +406,8 @@ class VideoPlayerServiceHandler extends BaseAudioHandler with SeekHandler {
+@@ -365,8 +410,8 @@
      if (_item.isEmpty) clear();
    }
  

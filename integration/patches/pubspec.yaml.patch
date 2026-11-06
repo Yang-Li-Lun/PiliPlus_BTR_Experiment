@@ -1,8 +1,8 @@
 diff --git a/pubspec.yaml b/pubspec.yaml
-index 35c3a38e33cf7b4d7bf98c8e34d551016377e42b..fe9aa9c0a8102321d4bd1560dfaa534111526389 100644
+index bca7a29c548a76fd7bce0e3c6ed2321fa05b50a2..5ef3ea03fe4d6db41dc9b55badfb4939ec7d2abf 100644
 --- a/pubspec.yaml
 +++ b/pubspec.yaml
-@@ -225,6 +225,8 @@ dependency_overrides:
+@@ -230,6 +230,8 @@
        ref: native
  
  dev_dependencies:

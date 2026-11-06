@@ -1,5 +1,5 @@
 diff --git a/lib/plugin/pl_player/controller.dart b/lib/plugin/pl_player/controller.dart
-index fb98ecf3d2c6eb59326102e133ca8c8b6df5bfa6..2bc40608e66678db09a6e329c5333f694a7a8214 100644
+index aa70701ba6facf64c8099e49e14adc01972db976..f0683ee6d42cabd9993f57aeed912d61bc3ad65d 100644
 --- a/lib/plugin/pl_player/controller.dart
 +++ b/lib/plugin/pl_player/controller.dart
 @@ -1,4 +1,4 @@
@@ -8,7 +8,7 @@ index fb98ecf3d2c6eb59326102e133ca8c8b6df5bfa6..2bc40608e66678db09a6e329c5333f69
  import 'dart:convert' show ascii, utf8;
  import 'dart:io' show Platform;
  import 'dart:math' show max, min;
-@@ -30,6 +30,14 @@ import 'package:PiliPlus/plugin/pl_player/models/video_fit_type.dart';
+@@ -30,6 +30,14 @@
  import 'package:PiliPlus/plugin/pl_player/utils/danmaku_options.dart';
  import 'package:PiliPlus/plugin/pl_player/utils/fullscreen.dart';
  import 'package:PiliPlus/services/service_locator.dart';
@@ -23,7 +23,7 @@ index fb98ecf3d2c6eb59326102e133ca8c8b6df5bfa6..2bc40608e66678db09a6e329c5333f69
  import 'package:PiliPlus/utils/accounts.dart';
  import 'package:PiliPlus/utils/android/android_helper.dart';
  import 'package:PiliPlus/utils/android/bindings.g.dart';
-@@ -70,10 +78,22 @@ import 'package:screen_brightness_platform_interface/screen_brightness_platform_
+@@ -70,10 +78,22 @@
  import 'package:wakelock_plus/wakelock_plus.dart';
  import 'package:window_manager/window_manager.dart';
  
@@ -46,16 +46,16 @@ index fb98ecf3d2c6eb59326102e133ca8c8b6df5bfa6..2bc40608e66678db09a6e329c5333f69
    Player? _videoPlayerController;
    VideoController? _videoController;
  
-@@ -136,8 +156,6 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
+@@ -136,8 +156,6 @@
+ 
    late final RxBool continuePlayInBackground =
        Pref.continuePlayInBackground.obs;
- 
--  bool _autoPlay = false;
 -
+-  bool _autoPlay = false;
+ 
    // 记录历史记录
    int? _aid;
-   String? _bvid;
-@@ -156,6 +174,8 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
+@@ -157,6 +175,8 @@
  
    Timer? _timer;
    StreamSubscription? _subForSeek;
@@ -64,15 +64,15 @@ index fb98ecf3d2c6eb59326102e133ca8c8b6df5bfa6..2bc40608e66678db09a6e329c5333f69
  
    Box setting = GStorage.setting;
  
-@@ -655,6 +675,7 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
+@@ -657,6 +677,7 @@
  
    // 添加一个私有构造函数
    PlPlayerController._() {
 +    _taskScope = PlaybackTaskScope(onClose: _disposeResources);
-     if (PlatformUtils.isMobile) {
+     if (PlatformUtils.isMobile && !DeviceUtils.isChromeOS) {
        _orientationListener = NativeDeviceOrientationPlatform.instance
            .onOrientationChanged(
-@@ -727,69 +748,88 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
+@@ -729,69 +750,88 @@
      Volume? volume,
      bool autoFullScreenFlag = false,
      int? rotate,
@@ -98,12 +98,6 @@ index fb98ecf3d2c6eb59326102e133ca8c8b6df5bfa6..2bc40608e66678db09a6e329c5333f69
 -
 -      if (showSeekPreview) {
 -        _clearPreview();
--      }
--      cancelLongPressTimer();
--      if (_videoPlayerController != null &&
--          _videoPlayerController!.state.playing) {
--        await pause(notify: false);
--      }
 +  }) {
 +    _retryTimer?.cancel();
 +    _retryTimer = null;
@@ -140,20 +134,7 @@ index fb98ecf3d2c6eb59326102e133ca8c8b6df5bfa6..2bc40608e66678db09a6e329c5333f69
 +            _videoPlayerController!.state.playing) {
 +          await pause(notify: false, preserveIntent: true);
 +        }
- 
--      if (_playerCount == 0) {
--        return;
--      }
--      // 配置Player 音轨、字幕等等
--      await _createVideoController(dataSource, seekTo, volume, rotate);
--
--      if (_playerCount == 0) {
--        _removeListeners();
--        _videoPlayerController?.dispose();
--        _videoPlayerController = null;
--        _videoController = null;
--        return;
--      }
++
 +        if (_playerCount == 0 || !isCurrent()) {
 +          return;
 +        }
@@ -167,9 +148,7 @@ index fb98ecf3d2c6eb59326102e133ca8c8b6df5bfa6..2bc40608e66678db09a6e329c5333f69
 +        )) {
 +          return;
 +        }
- 
--      updateDuration(duration ?? _videoPlayerController!.state.duration);
--      position.value = buffered.value = seekTo?.inSeconds ?? 0;
++
 +        if (_playerCount == 0) {
 +          _removeListeners();
 +          if (_videoPlayerController case final player?) {
@@ -179,23 +158,12 @@ index fb98ecf3d2c6eb59326102e133ca8c8b6df5bfa6..2bc40608e66678db09a6e329c5333f69
 +          _videoController = null;
 +          return;
 +        }
- 
--      dataStatus.value = .loaded;
++
 +        updateDuration(duration ?? _videoPlayerController!.state.duration);
 +        position.value = buffered.value = seekTo?.inSeconds ?? 0;
- 
--      if (autoFullScreenFlag && autoEnterFullScreen) {
--        triggerFullScreen(status: true);
--      }
++
 +        dataStatus.value = .loaded;
- 
--      await _initializePlayer();
--      onInit?.call();
--    } catch (err, stackTrace) {
--      dataStatus.value = DataStatus.error;
--      if (kDebugMode) {
--        debugPrint(stackTrace.toString());
--        debugPrint('plPlayer err:  $err');
++
 +        if (autoFullScreenFlag && autoEnterFullScreen) {
 +          triggerFullScreen(status: true);
 +        }
@@ -211,6 +179,43 @@ index fb98ecf3d2c6eb59326102e133ca8c8b6df5bfa6..2bc40608e66678db09a6e329c5333f69
 +      } finally {
 +        _processing = false;
        }
+-      cancelLongPressTimer();
+-      if (_videoPlayerController != null &&
+-          _videoPlayerController!.state.playing) {
+-        await pause(notify: false);
+-      }
+-
+-      if (_playerCount == 0) {
+-        return;
+-      }
+-      // 配置Player 音轨、字幕等等
+-      await _createVideoController(dataSource, seekTo, volume, rotate);
+-
+-      if (_playerCount == 0) {
+-        _removeListeners();
+-        _videoPlayerController?.dispose();
+-        _videoPlayerController = null;
+-        _videoController = null;
+-        return;
+-      }
+-
+-      updateDuration(duration ?? _videoPlayerController!.state.duration);
+-      position.value = buffered.value = seekTo?.inSeconds ?? 0;
+-
+-      dataStatus.value = .loaded;
+-
+-      if (autoFullScreenFlag && autoEnterFullScreen) {
+-        triggerFullScreen(status: true);
+-      }
+-
+-      await _initializePlayer();
+-      onInit?.call();
+-    } catch (err, stackTrace) {
+-      dataStatus.value = DataStatus.error;
+-      if (kDebugMode) {
+-        debugPrint(stackTrace.toString());
+-        debugPrint('plPlayer err:  $err');
+-      }
 -    } finally {
 -      _processing = false;
 -    }
@@ -218,7 +223,7 @@ index fb98ecf3d2c6eb59326102e133ca8c8b6df5bfa6..2bc40608e66678db09a6e329c5333f69
    }
  
    String? shadersDirPath;
-@@ -844,7 +884,7 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
+@@ -846,7 +886,7 @@
      }
    }
  
@@ -227,12 +232,17 @@ index fb98ecf3d2c6eb59326102e133ca8c8b6df5bfa6..2bc40608e66678db09a6e329c5333f69
      assert(_videoPlayerController == null);
      final opt = {
        'video-sync': Pref.videoSync,
-@@ -865,16 +905,26 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
+@@ -864,22 +904,32 @@
        ),
      );
  
+-    // >100% 的音量走 af 增益+限幅，避免直接放大 mpv volume 导致削波
+-    await setVolumeCapped(
+-      player,
+-      PlatformUtils.isMobile ? Pref.playerVolume / 100 : volume.value,
+-    );
 +    if (_taskScope.closed) return player;
-+
+ 
      assert(_videoController == null);
  
 -    _videoController = await VideoController.create(
@@ -244,6 +254,12 @@ index fb98ecf3d2c6eb59326102e133ca8c8b6df5bfa6..2bc40608e66678db09a6e329c5333f69
 -      ),
 -    );
 +    try {
++      // >100% 的音量走 af 增益+限幅，避免直接放大 mpv volume 导致削波
++      await setVolumeCapped(
++        player,
++        PlatformUtils.isMobile ? Pref.playerVolume / 100 : volume.value,
++      );
++      if (_taskScope.closed) return player;
 +      final videoController = await VideoController.create(
 +        player,
 +        configuration: VideoControllerConfiguration(
@@ -262,7 +278,7 @@ index fb98ecf3d2c6eb59326102e133ca8c8b6df5bfa6..2bc40608e66678db09a6e329c5333f69
  
      if (Platform.isAndroid) {
        // Avoid sizing the surface using mpv's idle window between media loads.
-@@ -886,93 +936,23 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
+@@ -891,93 +941,23 @@
      _startListeners(player);
  
      return player;
@@ -366,7 +382,7 @@ index fb98ecf3d2c6eb59326102e133ca8c8b6df5bfa6..2bc40608e66678db09a6e329c5333f69
      // 设置倍速
      if (_videoPlayerController != null) {
        final speed = isLive ? 1.0 : playbackSpeed;
-@@ -980,11 +960,16 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
+@@ -985,11 +965,16 @@
          await setPlaybackSpeed(speed);
        }
      }
@@ -385,7 +401,7 @@ index fb98ecf3d2c6eb59326102e133ca8c8b6df5bfa6..2bc40608e66678db09a6e329c5333f69
      }
    }
  
-@@ -993,6 +978,7 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
+@@ -998,6 +983,7 @@
    final Set<ValueChanged<PlayerStatus>> _statusListeners = {};
  
    Timer? _wakeLockTimer;
@@ -393,7 +409,7 @@ index fb98ecf3d2c6eb59326102e133ca8c8b6df5bfa6..2bc40608e66678db09a6e329c5333f69
  
    void _startWakeLockTimer() {
      _wakeLockTimer?.cancel();
-@@ -1013,6 +999,7 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
+@@ -1018,6 +1004,7 @@
    }
  
    void _updatePlaybackState({Duration? position, String? debugLabel}) {
@@ -401,7 +417,7 @@ index fb98ecf3d2c6eb59326102e133ca8c8b6df5bfa6..2bc40608e66678db09a6e329c5333f69
      videoPlayerServiceHandler?.onUpdateState(
        playerStatus,
        isBuffering.value,
-@@ -1063,6 +1050,13 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
+@@ -1068,6 +1055,13 @@
  
        ///completed
        stream.completed.listen((bool completed) {
@@ -415,7 +431,7 @@ index fb98ecf3d2c6eb59326102e133ca8c8b6df5bfa6..2bc40608e66678db09a6e329c5333f69
          if (completed) {
            playerStatus = .completed;
            _startWakeLockTimer();
-@@ -1077,6 +1071,7 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
+@@ -1082,6 +1076,7 @@
  
        /// position
        stream.position.listen((Duration position) {
@@ -423,7 +439,7 @@ index fb98ecf3d2c6eb59326102e133ca8c8b6df5bfa6..2bc40608e66678db09a6e329c5333f69
          final posInSeconds = position.inSeconds;
  
          if (posInSeconds != this.position.value) {
-@@ -1119,6 +1114,7 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
+@@ -1124,6 +1119,7 @@
            }
          })),
        stream.error.listen((String event) {
@@ -431,7 +447,7 @@ index fb98ecf3d2c6eb59326102e133ca8c8b6df5bfa6..2bc40608e66678db09a6e329c5333f69
          if (dataSource is FileSource &&
              event.startsWith("Failed to open file")) {
            return;
-@@ -1127,7 +1123,11 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
+@@ -1132,7 +1128,11 @@
            if (event.startsWith('tcp: ffurl_read returned ') ||
                event.startsWith("Failed to open https://") ||
                event.startsWith("Can not open external file https://")) {
@@ -444,7 +460,7 @@ index fb98ecf3d2c6eb59326102e133ca8c8b6df5bfa6..2bc40608e66678db09a6e329c5333f69
            }
            return;
          }
-@@ -1139,21 +1139,24 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
+@@ -1144,21 +1144,24 @@
            EasyThrottle.throttle(
              'controllerStream.error.listen',
              const Duration(milliseconds: 10000),
@@ -484,7 +500,7 @@ index fb98ecf3d2c6eb59326102e133ca8c8b6df5bfa6..2bc40608e66678db09a6e329c5333f69
            );
          } else if (event.startsWith('Could not open codec')) {
            SmartDialog.showToast('无法加载解码器, $event，可能会切换至软解');
-@@ -1174,10 +1177,11 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
+@@ -1179,10 +1182,11 @@
    }
  
    /// 移除事件监听
@@ -498,18 +514,12 @@ index fb98ecf3d2c6eb59326102e133ca8c8b6df5bfa6..2bc40608e66678db09a6e329c5333f69
    }
  
    void _cancelSubForSeek() {
-@@ -1185,20 +1189,16 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
+@@ -1190,20 +1194,16 @@
        _subForSeek!.cancel();
        _subForSeek = null;
      }
-+    final pending = _pendingSeekCompletion;
-+    _pendingSeekCompletion = null;
-+    if (pending != null && !pending.isCompleted) {
-+      _seekToRequest++;
-+      pending.complete();
-+    }
-   }
- 
+-  }
+-
 -  Future<void> seek(Duration position, {bool isSeek = false}) async {
 -    if (isSeek) {
 -      /// 拖动进度条调节时，不等待第一帧，防止抖动
@@ -522,12 +532,20 @@ index fb98ecf3d2c6eb59326102e133ca8c8b6df5bfa6..2bc40608e66678db09a6e329c5333f69
 -    } catch (e) {
 -      if (kDebugMode) debugPrint('seek failed: $e');
 -    }
++    final pending = _pendingSeekCompletion;
++    _pendingSeekCompletion = null;
++    if (pending != null && !pending.isCompleted) {
++      _seekToRequest++;
++      pending.complete();
++    }
++  }
++
 +  Future<void> seek(Duration position, {bool isSeek = false}) {
 +    return _seekBtrPlayer(position, isSeek: isSeek);
    }
  
    /// 跳转至指定位置
-@@ -1206,20 +1206,34 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
+@@ -1211,20 +1211,34 @@
      if (_playerCount == 0) {
        return;
      }
@@ -567,7 +585,7 @@ index fb98ecf3d2c6eb59326102e133ca8c8b6df5bfa6..2bc40608e66678db09a6e329c5333f69
      }
    }
  
-@@ -1246,15 +1260,38 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
+@@ -1251,15 +1265,38 @@
  
    /// 播放视频
    Future<void> play({bool repeat = false, bool hideControls = true}) async {
@@ -577,17 +595,19 @@ index fb98ecf3d2c6eb59326102e133ca8c8b6df5bfa6..2bc40608e66678db09a6e329c5333f69
 +    final intent = _seekIntent.requestPlaying(true);
 +    final player = _videoPlayerController;
      // 播放时自动隐藏控制条
-     controls = !hideControls;
+     if (hideControls) controls = false;
      // repeat为true，将从头播放
 +    var seekRequest = _seekToRequest;
      if (repeat) {
 -      await seekTo(Duration.zero, isSeek: false);
+-    }
+-
+-    await _videoPlayerController?.play();
 +      final seeking = seekTo(Duration.zero, isSeek: false);
 +      seekRequest = _seekToRequest;
 +      await seeking;
-     }
- 
--    await _videoPlayerController?.play();
++    }
++
 +    if ((repeat && seekRequest != _seekToRequest) ||
 +        !_seekIntent.isCurrent(intent) ||
 +        !identical(player, _videoPlayerController)) {
@@ -609,7 +629,7 @@ index fb98ecf3d2c6eb59326102e133ca8c8b6df5bfa6..2bc40608e66678db09a6e329c5333f69
  
      audioSessionHandler?.setActive(true);
  
-@@ -1262,8 +1299,16 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
+@@ -1267,8 +1304,16 @@
    }
  
    /// 暂停播放
@@ -627,7 +647,7 @@ index fb98ecf3d2c6eb59326102e133ca8c8b6df5bfa6..2bc40608e66678db09a6e329c5333f69
      playerStatus = .paused;
  
      // 主动暂停时让出音频焦点
-@@ -1397,16 +1442,19 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
+@@ -1402,14 +1447,15 @@
    }
  
    bool get isCompleted =>
@@ -642,17 +662,12 @@ index fb98ecf3d2c6eb59326102e133ca8c8b6df5bfa6..2bc40608e66678db09a6e329c5333f69
    Future<void> onDoubleTapCenter() async {
      if (!isLive && isCompleted) {
 -      await videoPlayerController!.seek(Duration.zero);
--      videoPlayerController!.play();
+-      await videoPlayerController!.play();
 +      await play(repeat: true);
-+    } else if (videoPlayerController!.state.playing) {
-+      await pause();
+     } else if (videoPlayerController!.state.playing) {
+       await pause();
      } else {
--      videoPlayerController!.playOrPause();
-+      await play();
-     }
-   }
- 
-@@ -1443,11 +1491,20 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
+@@ -1450,11 +1496,20 @@
      }
    }
  
@@ -676,7 +691,7 @@ index fb98ecf3d2c6eb59326102e133ca8c8b6df5bfa6..2bc40608e66678db09a6e329c5333f69
    }
  
    void doubleTapFuc(DoubleTapType type) {
-@@ -1682,7 +1739,15 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
+@@ -1689,7 +1744,15 @@
        return;
      }
  
@@ -692,7 +707,7 @@ index fb98ecf3d2c6eb59326102e133ca8c8b6df5bfa6..2bc40608e66678db09a6e329c5333f69
      if (removeSafeArea) {
        showSystemBar();
      }
-@@ -1700,6 +1765,11 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
+@@ -1707,6 +1770,11 @@
        IOSPipHelper.dispose();
      }
      _timer?.cancel();
@@ -704,7 +719,7 @@ index fb98ecf3d2c6eb59326102e133ca8c8b6df5bfa6..2bc40608e66678db09a6e329c5333f69
      // _position.close();
      // _playerEventSubs?.cancel();
      // _sliderPosition.close();
-@@ -1717,7 +1787,7 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
+@@ -1724,7 +1792,7 @@
        WindowController.instance.window?.isAlwaysOnTop = false;
      }
  
@@ -713,7 +728,7 @@ index fb98ecf3d2c6eb59326102e133ca8c8b6df5bfa6..2bc40608e66678db09a6e329c5333f69
      _positionListeners.clear();
      _statusListeners.clear();
      _stopWakeLockTimer();
-@@ -1725,11 +1795,11 @@ class PlPlayerController with BlockConfigMixin, AudioNormalizationMixin {
+@@ -1732,11 +1800,11 @@
      if (kDebugMode) {
        debugPrint('dispose player');
      }
